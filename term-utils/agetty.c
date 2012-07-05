@@ -423,6 +423,7 @@ int main(int argc, char **argv)
 		login_options_to_argv(login_argv, &login_argc,
 				      options.logopt, username);
 	} else {
+		login_argv[login_argc++] = "-0";
 		if (fakehost && (options.flags & F_REMOTE)) {
 			login_argv[login_argc++] = "-h";
 			login_argv[login_argc++] = fakehost;
@@ -455,10 +456,6 @@ int main(int argc, char **argv)
 	}
 
 	/* Let the login program take care of password validation. */
-	printf("%s\n", options.login);
-	int jj = 0, jn = login_argc;
-	while (jj < jn)
-	    printf("%s\n", login_argv[jj++]);
 	execv(options.login, login_argv);
 	log_err(_("%s: can't exec %s: %m"), options.tty, login_argv[0]);
 }
@@ -525,6 +522,8 @@ static void login_options_to_argv(char *argv[], int *argc,
 		str++;
 	p = str;
 
+	argv[i++] = "-0";
+
 	while (p && *p && i < LOGIN_ARGV_MAX) {
 		if (isspace(*p)) {
 			*p = '\0';
@@ -539,8 +538,6 @@ static void login_options_to_argv(char *argv[], int *argc,
 	}
 	if (str && *str && i < LOGIN_ARGV_MAX)
 		argv[i++] = replace_u(str, username);
-	
-	argv[i++] = "LOGIN_RETRIES=0";
 	
 	*argc = i;
 }

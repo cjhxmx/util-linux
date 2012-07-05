@@ -767,7 +767,7 @@ static pam_handle_t *init_loginpam(struct login_context *cxt)
 	return pamh;
 }
 
-static void loginpam_auth(struct login_context *cxt)
+static void _loginpam_auth(struct login_context *cxt, int doretries)
 {
 	int rc, show_unknown;
 	unsigned int retries, failcount = 0;
@@ -779,7 +779,10 @@ static void loginpam_auth(struct login_context *cxt)
 	loginpam_get_username(pamh, &cxt->username);
 
 	show_unknown = getlogindefs_bool("LOG_UNKFAIL_ENAB", 0);
-	retries = getlogindefs_num("LOGIN_RETRIES", LOGIN_MAX_TRIES);
+	if (doretries)
+		retries = getlogindefs_num("LOGIN_RETRIES", LOGIN_MAX_TRIES);
+	else
+		retries = 0;
 
 	/*
 	 * There may be better ways to deal with some of these conditions, but
@@ -847,6 +850,11 @@ static void loginpam_auth(struct login_context *cxt)
 		pam_end(pamh, rc);
 		sleepexit(EXIT_SUCCESS);
 	}
+}
+
+static void loginpam_auth(struct login_context *cxt)
+{
+       _loginpam_auth(cxt, 1);
 }
 
 static void loginpam_acct(struct login_context *cxt)
@@ -1248,14 +1256,20 @@ int main(int argc, char **argv)
 	setpriority(PRIO_PROCESS, 0, 0);
 	initproctitle(argc, argv);
 
+	int retries = 1;
+
 	/*
 	 * -p is used by getty to tell login not to destroy the environment
 	 * -f is used to skip a second login authentication
 	 * -h is used by other servers to pass the name of the remote
 	 *    host to login so that it may be placed in utmp and wtmp
 	 */
-	while ((c = getopt(argc, argv, "fHh:pV")) != -1)
+	while ((c = getopt(argc, argv, "0fHh:pV")) != -1)
 		switch (c) {
+		case '0':
+			retries = 0;
+			break;
+
 		case 'f':
 			cxt.noauth = 1;
 			break;
@@ -1312,7 +1326,7 @@ int main(int argc, char **argv)
 	cxt.noauth = cxt.noauth && getuid() == 0 ? 1 : 0;
 
 	if (!cxt.noauth)
-		loginpam_auth(&cxt);
+		_loginpam_auth(&cxt, retries);
 
 	/*
 	 * Authentication may be skipped (for example, during krlogin, rlogin,
