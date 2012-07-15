@@ -35,6 +35,10 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
+#ifdef HAVE_INOTIFY_INIT
+#include <sys/inotify.h>
+#endif
 
 #include "c.h"
 #include "nls.h"
@@ -43,7 +47,7 @@
 
 static char *timetostr(const time_t time)
 {
-	static char s[29];    /* [Sun Sep 01 00:00:00 1998 PST] */
+	static char s[29];	/* [Sun Sep 01 00:00:00 1998 PST] */
 
 	if (time != 0)
 		strftime(s, 29, "%a %b %d %T %Y %Z", localtime(&time));
@@ -79,15 +83,6 @@ static void xcleanse(char *s, int len)
 			*s = '?';
 }
 
-static void unspace(char *s, int len)
-{
-	while (*s && *s != ' ' && len--)
-		++s;
-
-	if (len > 0)
-		*s = '\0';
-}
-
 static void print_utline(struct utmp ut)
 {
 	char *addr_string, *time_string;
@@ -101,34 +96,133 @@ static void print_utline(struct utmp ut)
 	cleanse(ut.ut_line);
 	cleanse(ut.ut_host);
 
-        /*            pid    id       user     line     host     addr       time */
+	/*            pid    id       user     line     host     addr       time */
 	printf("[%d] [%05d] [%-4.4s] [%-*.*s] [%-*.*s] [%-*.*s] [%-15.15s] [%-28.28s]\n",
 	       ut.ut_type, ut.ut_pid, ut.ut_id, 8, UT_NAMESIZE, ut.ut_user,
 	       12, UT_LINESIZE, ut.ut_line, 20, UT_HOSTSIZE, ut.ut_host,
-               addr_string, time_string);
+	       addr_string, time_string);
 }
 
-static void dump(FILE *fp, int forever)
+#ifdef HAVE_INOTIFY_INIT
+#define EVENTS		(IN_MODIFY|IN_DELETE_SELF|IN_MOVE_SELF|IN_UNMOUNT)
+#define NEVENTS		4
+
+static void roll_file(const char *filename, off_t *size)
+{
+	FILE *fp;
+	struct stat st;
+	struct utmp ut;
+	off_t pos;
+
+	if (!(fp = fopen(filename, "r")))
+		err(EXIT_FAILURE, _("%s: open failed"), filename);
+
+	if (fstat(fileno(fp), &st) == -1)
+		err(EXIT_FAILURE, _("%s: stat failed"), filename);
+
+	if (st.st_size == *size)
+		goto done;
+
+	if (fseek(fp, *size, SEEK_SET) != (off_t) -1) {
+		while (fread(&ut, sizeof(ut), 1, fp) == 1)
+			print_utline(ut);
+	}
+
+	pos = ftello(fp);
+	/* If we've successfully read something, use the file position, this
+	 * avoids data duplication.  If we read nothing or hit an error,
+	 * reset to the reported size, this handles truncated files.
+	 */
+	*size = (pos != -1 && pos != *size) ? pos : st.st_size;
+
+done:
+	fclose(fp);
+}
+
+static int follow_by_inotify(FILE *fp, const char *filename)
+{
+	char buf[NEVENTS * sizeof(struct inotify_event)];
+	struct utmp ut;
+	int fd, wd, event;
+	ssize_t length;
+	off_t size;
+
+	fd = inotify_init();
+	if (fd == -1)
+		return -1;	/* probably reached any limit ... */
+
+	size = ftello(fp);
+	fclose(fp);
+
+	wd = inotify_add_watch(fd, filename, EVENTS);
+	if (wd == -1)
+		err(EXIT_FAILURE, _("%s: cannot add inotify watch."), filename);
+
+	while (wd >= 0) {
+		errno = 0;
+		length = read(fd, buf, sizeof(buf));
+
+		if (length < 0 && (errno == EINTR || errno == EAGAIN))
+			continue;
+		if (length < 0)
+			err(EXIT_FAILURE, _("%s: cannot read inotify events"),
+				    filename);
+
+		for (event = 0; event < length;) {
+			struct inotify_event *ev =
+				    (struct inotify_event *) &buf[event];
+
+			if (ev->mask & IN_MODIFY)
+				roll_file(filename, &size);
+			else {
+				close(wd);
+				wd = -1;
+				break;
+			}
+			event += sizeof(struct inotify_event) + ev->len;
+		}
+	}
+
+	close(fd);
+	return 0;
+}
+#endif /* HAVE_INOTIFY_INIT */
+
+static FILE *dump(FILE *fp, const char *filename, int follow)
 {
 	struct utmp ut;
 
-	if (forever)
+	if (follow)
 		fseek(fp, -10 * sizeof(ut), SEEK_END);
 
-	do {
-		while (fread(&ut, sizeof(ut), 1, fp) == 1)
-			print_utline(ut);
-		if (forever)
+	while (fread(&ut, sizeof(ut), 1, fp) == 1)
+		print_utline(ut);
+
+	if (!follow)
+		return fp;
+
+#ifdef HAVE_INOTIFY_INIT
+	if (follow_by_inotify(fp, filename) == 0)
+		return NULL;				/* file already closed */
+	else
+#endif
+		/* fallback for systems without inotify or with non-free
+		 * inotify instances */
+		for (;;) {
+			while (fread(&ut, sizeof(ut), 1, fp) == 1)
+				print_utline(ut);
 			sleep(1);
-	} while (forever);
+		}
+
+	return fp;
 }
+
 
 /* This function won't work properly if there's a ']' or a ' ' in the real
  * token.  Thankfully, this should never happen.  */
 static int gettok(char *line, char *dest, int size, int eatspace)
 {
 	int bpos, epos, eaten;
-        char *t;
 
 	bpos = strchr(line, '[') - line;
 	if (bpos < 0)
@@ -137,16 +231,17 @@ static int gettok(char *line, char *dest, int size, int eatspace)
 	line += 1 + bpos;
 	epos = strchr(line, ']') - line;
 	if (epos < 0)
-		errx(EXIT_FAILURE,_("Extraneous newline in file. Exiting."));
+		errx(EXIT_FAILURE, _("Extraneous newline in file. Exiting."));
 
 	line[epos] = '\0';
 	eaten = bpos + epos + 1;
 
 	if (eatspace) {
-                if ((t = strchr(line, ' ')))
-                    *t = 0;
+		char *t;
+		if ((t = strchr(line, ' ')))
+			*t = 0;
 	}
-        strncpy(dest, line, size);
+	strncpy(dest, line, size);
 
 	return eaten + 1;
 }
@@ -161,23 +256,22 @@ static void undump(FILE *fp)
 	s_addr[15] = 0;
 	s_time[28] = 0;
 
-	while (fgets(linestart, 1023, fp))
-	{
+	while (fgets(linestart, 1023, fp)) {
 		line = linestart;
-                memset(&ut, '\0', sizeof(ut));
-                sscanf(line, "[%hd] [%d] [%4c] ", &ut.ut_type, &ut.ut_pid, ut.ut_id);
+		memset(&ut, '\0', sizeof(ut));
+		sscanf(line, "[%hd] [%d] [%4c] ", &ut.ut_type, &ut.ut_pid, ut.ut_id);
 
 		line += 19;
-                line += gettok(line, ut.ut_user, sizeof(ut.ut_user), 1);
-                line += gettok(line, ut.ut_line, sizeof(ut.ut_line), 1);
-                line += gettok(line, ut.ut_host, sizeof(ut.ut_host), 1);
-		line += gettok(line, s_addr, sizeof(s_addr)-1, 1);
-		line += gettok(line, s_time, sizeof(s_time)-1, 0);
+		line += gettok(line, ut.ut_user, sizeof(ut.ut_user), 1);
+		line += gettok(line, ut.ut_line, sizeof(ut.ut_line), 1);
+		line += gettok(line, ut.ut_host, sizeof(ut.ut_host), 1);
+		line += gettok(line, s_addr, sizeof(s_addr) - 1, 1);
+		line += gettok(line, s_time, sizeof(s_time) - 1, 0);
 
-                ut.ut_addr = inet_addr(s_addr);
-                ut.ut_time = strtotime(s_time);
+		ut.ut_addr = inet_addr(s_addr);
+		ut.ut_time = strtotime(s_time);
 
-                fwrite(&ut, sizeof(ut), 1, stdout);
+		fwrite(&ut, sizeof(ut), 1, stdout);
 
 		++count;
 	}
@@ -190,7 +284,7 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	fputs(USAGE_HEADER, out);
 
 	fprintf(out,
-		_(" %s [options]\n"), program_invocation_short_name);
+		_(" %s [options] [filename]\n"), program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
 	fputs(_(" -f, --follow           output appended data as the file grows\n"
@@ -205,8 +299,8 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 int main(int argc, char **argv)
 {
 	int c;
-	FILE *fp;
-	int reverse = 0, forever = 0;
+	FILE *fp = NULL;
+	int reverse = 0, follow = 0;
 	const char *filename = NULL;
 
 	static const struct option longopts[] = {
@@ -229,7 +323,7 @@ int main(int argc, char **argv)
 			break;
 
 		case 'f':
-			forever = 1;
+			follow = 1;
 			break;
 
 		case 'h':
@@ -249,7 +343,9 @@ int main(int argc, char **argv)
 		if (!fp)
 			err(EXIT_FAILURE, _("%s: open failed"), filename);
 	} else {
-		filename = "stdin";
+		if (follow)
+			errx(EXIT_FAILURE, _("following standard input is unsupported"));
+		filename = "/dev/stdin";
 		fp = stdin;
 	}
 
@@ -258,10 +354,10 @@ int main(int argc, char **argv)
 		undump(fp);
 	} else {
 		fprintf(stderr, _("Utmp dump of %s\n"), filename);
-		dump(fp, forever);
+		fp = dump(fp, filename, follow);
 	}
 
-	if (fp != stdin)
+	if (fp && fp != stdin)
 		fclose(fp);
 
 	return EXIT_SUCCESS;

@@ -1324,7 +1324,9 @@ from the parent directory, and also gets the setgid bit set
 if it is a directory itself.
 .TP
 .BR grpquota | noquota | quota | usrquota
-These options are accepted but ignored.
+The usrquota (same as quota) mount option enables user quota support on the
+filesystem. grpquota enables group quotas support. You need the quota utilities
+to actually enable and manage the quota system.
 .TP
 .BR nouid32
 Disables 32-bit UIDs and GIDs.  This is for interoperability with older
@@ -1441,6 +1443,14 @@ manual page.
 Enable POSIX Access Control Lists. See the
 .BR acl (5)
 manual page.
+.TP
+.BR usrjquot=aquota.user | grpjquota=aquota.group | jqfmt=vfsv0
+Apart from the old quota system (as in ext2, jqfmt=vfsold aka version 1 quota)
+ext3 also supports journaled quotas (version 2 quota). jqfmt=vfsv0
+enables journaled quotas. For journaled quotas the mount options
+usrjquot=aquota.user and grpjquota=aquota.group are required to tell the
+quota system which quota database files to use. Journaled quotas have the
+advantage that even after a crash no quota check is required.
 
 .SH "Mount options for ext4"
 The ext4 filesystem is an advanced level of the ext3 filesystem which
@@ -1450,7 +1460,8 @@ filesystem.
 The options
 .B journal_dev, noload, data, commit, orlov, oldalloc, [no]user_xattr
 .B [no]acl, bsddf, minixdf, debug, errors, data_err, grpid, bsdgroups, nogrpid
-.B sysvgroups, resgid, resuid, sb, quota, noquota, grpquota and usrquota
+.B sysvgroups, resgid, resuid, sb, quota, noquota, grpquota, usrquota
+.B usrjquot, grpjquota and jqfmt
 are backwardly compatible with ext3 or ext2.
 .TP
 .BR journal_checksum

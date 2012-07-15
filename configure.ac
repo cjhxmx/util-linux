@@ -60,6 +60,22 @@ NONE:NONE | NONE:/usr | /usr:*)
   esac ;;
 esac
 
+case $prefix:$localstatedir in
+  NONE:'${prefix}/var')
+    localstatedir=/run
+    AC_MSG_NOTICE([  --localstatedir defaults to /run])
+    ;;
+  *:'${prefix}/var')
+    localstatedir=${prefix}/run
+    ;;
+  NONE:*)
+    ;;
+  *:*)
+    localstatedir=${prefix}/${localstatedir}
+    ;;
+esac
+AC_SUBST([localstatedir])
+
 libdirname=`basename "$libdir"`
 AC_SUBST([libdirname])
 
@@ -94,6 +110,7 @@ UL_WARN_ADD([-Wmissing-parameter-type])
 UL_WARN_ADD([-Wunused-result])
 UL_WARN_ADD([-Wunused-but-set-parameter])
 UL_WARN_ADD([-Wunused-but-set-variable])
+UL_WARN_ADD([-Wredundant-decls])
 AC_SUBST([WARN_CFLAGS])
 
 dnl libtool-2
@@ -628,9 +645,7 @@ fi
 AM_CONDITIONAL(HAVE_SLANG, test "x$have_slang" = xyes)
 
 
-if test "x$have_slang" = xyes -o "x$have_ncurses" = xyes; then
-  AM_CONDITIONAL(BUILD_CFDISK, true)
-fi
+AM_CONDITIONAL(BUILD_CFDISK, test "x$have_slang" = xyes -o "x$have_ncurses" = xyes)
 
 
 have_tinfo=no
@@ -1301,6 +1316,7 @@ LIBS=""
 
 AC_CONFIG_HEADERS(config.h)
 
+
 AC_CONFIG_FILES([
 Makefile
 libblkid/blkid.pc
@@ -1312,7 +1328,10 @@ libmount/docs/version.xml
 libmount/mount.pc
 libmount/src/libmount.h
 libuuid/uuid.pc
+misc-utils/uuidd.8
+misc-utils/uuidd.rc
 misc-utils/uuidd.service
+misc-utils/uuidd.socket
 po/Makefile.in
 tests/commands.sh
 ])

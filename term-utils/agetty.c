@@ -272,7 +272,7 @@ static char** getUsers();
 static char *fakehost;
 
 #ifdef DEBUGGING
-#define debug(s) do { fprintf(dbf,s); fflush(dbf); while (0)
+#define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
 FILE *dbf;
 #else
 #define debug(s) do { ; } while (0)
@@ -881,9 +881,11 @@ static void update_utmp(struct options *op)
 static void open_tty(char *tty, struct termios *tp, struct options *op)
 {
 	const pid_t pid = getpid();
-	int serial;
+	int serial, closed = 0;
 
 	/* Set up new standard input, unless we are given an already opened port. */
+
+sleep(10);
 
 	if (strcmp(tty, "-") != 0) {
 		char buf[PATH_MAX+1];
@@ -931,27 +933,33 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 				log_warn("/dev/%s: cannot get controlling tty: %m", tty);
 		}
 
-		if (op->flags & F_HANGUP) {
-			/*
-			 * vhangup() will replace all open file descriptors in the kernel
-			 * that point to our controlling tty by a dummy that will deny
-			 * further reading/writing to our device. It will also reset the
-			 * tty to sane defaults, so we don't have to modify the tty device
-			 * for sane settings. We also get a SIGHUP/SIGCONT.
-			 */
-			if (vhangup())
-				log_err("/dev/%s: vhangup() failed: %m", tty);
-			if (ioctl(fd, TIOCNOTTY))
-				debug("TIOCNOTTY ioctl failed\n");
-		}
-
-		close(fd);
 		close(STDIN_FILENO);
 		errno = 0;
+
+		if (op->flags & F_HANGUP) {
+
+			if (ioctl(fd, TIOCNOTTY))
+				debug("TIOCNOTTY ioctl failed\n");
+
+			/*
+			 * Let's close all file decriptors before vhangup
+			 * https://lkml.org/lkml/2012/6/5/145
+			 */
+			close(fd);
+			close(STDOUT_FILENO);
+			close(STDERR_FILENO);
+			errno = 0;
+			closed = 1;
+
+			if (vhangup())
+				log_err("/dev/%s: vhangup() failed: %m", tty);
+		} else
+			close(fd);
 
 		debug("open(2)\n");
 		if (open(buf, O_RDWR|O_NOCTTY|O_NONBLOCK, 0) != 0)
 			log_err(_("/dev/%s: cannot open as standard input: %m"), tty);
+
 		if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
 			if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
 				log_warn("/dev/%s: cannot get controlling tty: %m", tty);
@@ -970,12 +978,14 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 	}
 
 	if (tcsetpgrp(STDIN_FILENO, pid))
-		log_err("/dev/%s: cannot set process group: %m", tty);
+		log_warn("/dev/%s: cannot set process group: %m", tty);
 
 	/* Get rid of the present outputs. */
-	close(STDOUT_FILENO);
-	close(STDERR_FILENO);
-	errno = 0;
+	if (!closed) {
+		close(STDOUT_FILENO);
+		close(STDERR_FILENO);
+		errno = 0;
+	}
 
 	/* Set up standard output and standard error file descriptors. */
 	debug("duping\n");
@@ -1271,9 +1281,8 @@ static void do_prompt(struct options *op, struct termios *tp)
 		if (ioctl(STDIN_FILENO, KDGKBLED, &kb) == 0) {
 			char hint[256] = { '\0' };
 			int nl = 0;
-			struct stat st;
 
-			if (stat("/var/run/numlock-on", &st) == 0)
+			if (access(_PATH_NUMLOCK_ON, F_OK) == 0)
 				nl = 1;
 
 			if (nl && (kb & 0x02) == 0)

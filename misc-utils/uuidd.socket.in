@@ -2,7 +2,7 @@
 Description=UUID daemon activation socket
 
 [Socket]
-ListenStream=/var/run/uuidd/request
+ListenStream=@localstatedir@/uuidd/request
 
 [Install]
 WantedBy=sockets.target
