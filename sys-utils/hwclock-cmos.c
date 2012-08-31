@@ -82,12 +82,12 @@ int inb(int c __attribute__ ((__unused__)))
 extern unsigned int inb(unsigned long port);
 extern void outb(unsigned char b, unsigned long port);
 #else
-void outb(int a __attribute__ ((__unused__)),
+static void outb(int a __attribute__ ((__unused__)),
 	  int b __attribute__ ((__unused__)))
 {
 }
 
-int inb(int c __attribute__ ((__unused__)))
+static int inb(int c __attribute__ ((__unused__)))
 {
 	return 0;
 }
@@ -634,7 +634,7 @@ static int get_permissions_cmos(void)
 
 	if (use_dev_port) {
 		if ((dev_port_fd = open("/dev/port", O_RDWR)) < 0) {
-			warn(_("Cannot open /dev/port"));
+			warn(_("cannot open %s"), "/dev/port");
 			rc = 1;
 		} else
 			rc = 0;

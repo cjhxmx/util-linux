@@ -183,6 +183,7 @@ extern int mnt_optstr_get_option(const char *optstr, const char *name,
 extern int mnt_optstr_set_option(char **optstr, const char *name,
 				const char *value);
 extern int mnt_optstr_remove_option(char **optstr, const char *name);
+extern int mnt_optstr_deduplicate_option(char **optstr, const char *name);
 
 extern int mnt_split_optstr(const char *optstr,
 			    char **user, char **vfs, char **fs,
@@ -195,6 +196,7 @@ extern int mnt_optstr_get_flags(const char *optstr, unsigned long *flags,
 				const struct libmnt_optmap *map);
 extern int mnt_optstr_apply_flags(char **optstr, unsigned long flags,
                                 const struct libmnt_optmap *map);
+
 
 /* iter.c */
 enum {
@@ -428,6 +430,7 @@ extern int mnt_context_enable_force(struct libmnt_context *cxt, int enable);
 extern int mnt_context_enable_verbose(struct libmnt_context *cxt, int enable);
 extern int mnt_context_enable_loopdel(struct libmnt_context *cxt, int enable);
 extern int mnt_context_enable_fork(struct libmnt_context *cxt, int enable);
+extern int mnt_context_disable_swapmatch(struct libmnt_context *cxt, int disable);
 
 extern int mnt_context_get_optsmode(struct libmnt_context *cxt);
 extern int mnt_context_is_lazy(struct libmnt_context *cxt);
@@ -440,6 +443,7 @@ extern int mnt_context_is_verbose(struct libmnt_context *cxt);
 extern int mnt_context_is_loopdel(struct libmnt_context *cxt);
 extern int mnt_context_is_nohelpers(struct libmnt_context *cxt);
 extern int mnt_context_is_nocanonicalize(struct libmnt_context *cxt);
+extern int mnt_context_is_swapmatch(struct libmnt_context *cxt);
 
 extern int mnt_context_is_fork(struct libmnt_context *cxt);
 extern int mnt_context_is_parent(struct libmnt_context *cxt);
@@ -532,7 +536,7 @@ extern int mnt_context_do_umount(struct libmnt_context *cxt);
 extern int mnt_context_finalize_umount(struct libmnt_context *cxt);
 
 
-extern int mnt_context_fstab_applied(struct libmnt_context *cxt);
+extern int mnt_context_tab_applied(struct libmnt_context *cxt);
 extern int mnt_context_set_syscall_status(struct libmnt_context *cxt, int status);
 
 /*

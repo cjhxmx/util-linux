@@ -73,18 +73,12 @@ struct sun_disk_label {
 
 #define SUN_LABEL_MAGIC		0xDABE
 #define SUN_LABEL_MAGIC_SWAPPED	0xBEDA
-#define sunlabel ((struct sun_disk_label *)cxt->mbr)
+#define sunlabel ((struct sun_disk_label *)cxt->firstsector)
 
 /* fdisksunlabel.c */
 extern struct systypes sun_sys_types[];
-extern int check_sun_label(struct fdisk_context *cxt);
-extern void create_sunlabel(struct fdisk_context *cxt);
-extern void sun_delete_partition(struct fdisk_context *cxt, int i);
 extern int sun_change_sysid(struct fdisk_context *cxt, int i, uint16_t sys);
 extern void sun_list_table(struct fdisk_context *cxt, int xtra);
-extern void verify_sun(struct fdisk_context *cxt);
-extern void add_sun_partition(struct fdisk_context *cxt, int n, int sys);
-extern void sun_write_table(struct fdisk_context *cxt);
 extern void sun_set_alt_cyl(struct fdisk_context *cxt);
 extern void sun_set_ncyl(struct fdisk_context *cxt, int cyl);
 extern void sun_set_xcyl(struct fdisk_context *cxt);

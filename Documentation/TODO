@@ -8,15 +8,12 @@ lscpu
 
 losetup
 -------
-  - add new option --pretty and --output <columns> to print details about
+  - add new option --list and --output <columns> to print details about
     one or all (-a) devices by lib/tt.c output. For example people hate
     the hex devno in the default output.
 
 dmesg
 -----
-
- - add --follow option
-   http://www.spinics.net/lists/util-linux-ng/msg04453.html
 
  - add --color to colorize err and panic messages
 
@@ -83,21 +80,6 @@ libmount (mount/umount)
    translate the device name to backing file and then search in mtab for the 
    filename. See loopdev_get_loopfile().
 
- - (!) add --source and --target options to specify device and mountpoint
-
-     fstab:
-        /dev/sda1 /foo	auto	defaults 0 0
-        /foo      /mnt  auto    bind     0 0
-     command line:
-	mount -o remount,ro /foo
-
-    ... this command is ambiguous. It would be better to have a way how specify
-    target or source:
-
-        mount --target /foo -o remount,ro
-
-    Note that findmnt(8) already supports --target and --source.
-
  - add ---target-prefix option to specify prefix for mountpoints
    so then you can
 
@@ -132,12 +114,6 @@ docs
  - (!) add API documentation to libuuid
 
 
-build-sys
---------
-
- - use non-recursive build-sys, see
-   http://thread.gmane.org/gmane.linux.utilities.util-linux-ng/3297
-
 lib/tt.c
 --------
 
@@ -147,30 +123,18 @@ login-utils:
 -----------
 
  - (!) merge newgrp from shadow-utils
- - (!) enable login utils by default
 
 libblkid
 --------
 
+ - improve DBG() debug macro, see new imeplemntation in libmount/src/mountP.h
+
  - (!) don't use internally blkid_loff_t, rather use off_t, size_t, ssize_t,
        stdint.h types and so on...
-
- - add -<BE|LE> suffix to test images for native-endian filesystems (e.g. swap)
-   and add support for such functionality to tests/ts/blkid/low-probe
 
  - add FSSIZE value  -- filesystem size (klibc requirement)
 
  - (!) add support for dasd PT (used for example on s390)
-
- - (!!!) support PARTUUID= tag
-
-   * the partitions probing is already supported by low-level part of the
-     library, but it's necessary add support for this tag also to high-level
-     blkid_cache and blkid_evaluate_* APIs
-
-   * add blkid -P <PARTUUID>
-
-   * add PARTUUID to wipefs output
 
 fdisk(s)
 --------

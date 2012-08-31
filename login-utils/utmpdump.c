@@ -115,7 +115,7 @@ static void roll_file(const char *filename, off_t *size)
 	off_t pos;
 
 	if (!(fp = fopen(filename, "r")))
-		err(EXIT_FAILURE, _("%s: open failed"), filename);
+		err(EXIT_FAILURE, _("cannot open %s"), filename);
 
 	if (fstat(fileno(fp), &st) == -1)
 		err(EXIT_FAILURE, _("%s: stat failed"), filename);
@@ -142,7 +142,6 @@ done:
 static int follow_by_inotify(FILE *fp, const char *filename)
 {
 	char buf[NEVENTS * sizeof(struct inotify_event)];
-	struct utmp ut;
 	int fd, wd, event;
 	ssize_t length;
 	off_t size;
@@ -271,7 +270,7 @@ static void undump(FILE *fp)
 		ut.ut_addr = inet_addr(s_addr);
 		ut.ut_time = strtotime(s_time);
 
-		fwrite(&ut, sizeof(ut), 1, stdout);
+		ignore_result( fwrite(&ut, sizeof(ut), 1, stdout) );
 
 		++count;
 	}
@@ -287,10 +286,10 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 		_(" %s [options] [filename]\n"), program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
-	fputs(_(" -f, --follow           output appended data as the file grows\n"
-		" -r, --reverse          write back dumped data into utmp file\n"
-		" -h, --help             display this help and exit\n"
-		" -V, --version          output version information and exit\n"), out);
+	fputs(_(" -f, --follow   output appended data as the file grows\n"
+		" -r, --reverse  write back dumped data into utmp file\n"), out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
 
 	fprintf(out, USAGE_MAN_TAIL("utmpdump(1)"));
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
@@ -341,7 +340,7 @@ int main(int argc, char **argv)
 		filename = argv[optind];
 		fp = fopen(filename, "r");
 		if (!fp)
-			err(EXIT_FAILURE, _("%s: open failed"), filename);
+			err(EXIT_FAILURE, _("cannot open %s"), filename);
 	} else {
 		if (follow)
 			errx(EXIT_FAILURE, _("following standard input is unsupported"));

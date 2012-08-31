@@ -20,6 +20,17 @@ function ts_abspath {
 	pwd
 }
 
+function ts_canonicalize {
+	P="$1"
+	C=$(readlink -f $P)
+
+	if [ -n "$C" ]; then
+		echo "$C"
+	else
+		echo "$P"
+	fi
+}
+
 function ts_skip_subtest {
 	echo " IGNORE ($1)"
 }
@@ -75,6 +86,12 @@ function ts_has_option {
 	echo -n $ALL | sed 's/ //g' | awk 'BEGIN { FS="="; RS="--" } /('$NAME'$|'$NAME'=)/ { print "yes" }'
 }
 
+function ts_option_argument {
+	NAME="$1"
+	ALL="$2"
+	echo -n $ALL | sed 's/ //g' | awk 'BEGIN { FS="="; RS="--" } /'$NAME'=/ { print $2 }'
+}
+
 function ts_init_core_env {
 	TS_NS="$TS_COMPONENT/$TS_TESTNAME"
 	TS_OUTPUT="$TS_OUTDIR/$TS_TESTNAME"
@@ -109,7 +126,26 @@ function ts_init_env {
 
 	export LANG LANGUAGE LC_ALL CHARSET
 
+	mydir=$(ts_canonicalize "$mydir")
+
+	# automake directories
+	top_srcdir=$(ts_option_argument "srcdir" "$*")
+	top_builddir=$(ts_option_argument "builddir" "$*")
+
+	# where is this script
 	TS_TOPDIR=$(ts_abspath $mydir/../../)
+
+	# default
+	if [ -z "$top_srcdir" ]; then
+		top_srcdir="$TS_TOPDIR/.."
+	fi
+	if [ -z "$top_builddir" ]; then
+		top_builddir="$TS_TOPDIR/.."
+	fi
+
+	top_srcdir=$(ts_abspath $top_srcdir)
+	top_builddir=$(ts_abspath $top_builddir)
+
 	TS_SCRIPT="$mydir/$(basename $0)"
 	TS_SUBDIR=$(dirname $TS_SCRIPT)
 	TS_TESTNAME=$(basename $TS_SCRIPT)
@@ -120,15 +156,14 @@ function ts_init_env {
 
 	TS_SELF="$TS_SUBDIR"
 
-	TS_OUTDIR="$TS_TOPDIR/output/$TS_COMPONENT"
-	TS_DIFFDIR="$TS_TOPDIR/diff/$TS_COMPONENT"
+	TS_OUTDIR="$top_builddir/tests/output/$TS_COMPONENT"
+	TS_DIFFDIR="$top_builddir/tests/diff/$TS_COMPONENT"
 
 	ts_init_core_env
 
 	TS_VERBOSE=$(ts_has_option "verbose" "$*")
 
 	BLKID_FILE="$TS_OUTDIR/${TS_TESTNAME}.blkidtab"
-
 
 	declare -a TS_SUID_PROGS
 	declare -a TS_SUID_USER
@@ -221,6 +256,9 @@ function ts_gen_diff {
 	local res=0
 
 	if [ -s "$TS_OUTPUT" ]; then
+
+		# remove libtool lt- prefixes
+		sed --in-place 's/^lt\-\(.*\: \)/\1/g' $TS_OUTPUT
 
 		[ -d "$TS_DIFFDIR" ] || mkdir -p "$TS_DIFFDIR"
 		diff -u $TS_EXPECTED $TS_OUTPUT > $TS_DIFF
@@ -377,7 +415,7 @@ function ts_device_has_uuid {
 }
 
 function ts_is_mounted {
-	local DEV=$1
+	local DEV=$(ts_canonicalize "$1")
 
 	grep -q $DEV /proc/mounts && return 0
 

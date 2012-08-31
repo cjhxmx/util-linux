@@ -26,12 +26,6 @@ extern int dos_compatible_flag;
 extern int ext_index; /* the prime extended partition */
 extern sector_t extended_offset, sector_offset;
 
-static inline void write_part_table_flag(unsigned char *b)
-{
-	b[510] = 0x55;
-	b[511] = 0xaa;
-}
-
 /* A valid partition table sector ends in 0x55 0xaa */
 static inline unsigned int part_table_flag(unsigned char *b)
 {
@@ -43,15 +37,11 @@ static inline sector_t get_partition_start(struct pte *pe)
 	return pe->offset + get_start_sect(pe->part_table);
 }
 
-extern void create_doslabel(struct fdisk_context *cxt);
 extern void dos_print_mbr_id(struct fdisk_context *cxt);
 extern void dos_set_mbr_id(struct fdisk_context *cxt);
-extern void dos_delete_partition(int i);
-extern int check_dos_label(struct fdisk_context *cxt);
 extern int is_dos_partition(int t);
 extern void dos_init(struct fdisk_context *cxt);
-extern void dos_add_partition(struct fdisk_context *cxt, int n, int sys);
-extern void dos_new_partition(struct fdisk_context *cxt);
-extern void dos_write_table(struct fdisk_context *cxt);
+
+extern int mbr_is_valid_magic(unsigned char *b);
 
 #endif

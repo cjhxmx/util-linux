@@ -1,84 +1,72 @@
+agetty:  
 blockdev:  
+cal:  libncursesw libtinfo 
+cfdisk:  libncursesw libtinfo 
+chcpu:  
+chrt:  
+col:  
+colcrt:  
+colrm:  
+column:  
+ctrlaltdel:  
+cytune:  
+dmesg:  
+fallocate:  
 fdformat:  
+fdisk:  ld-linux-x86-64 
+flock:  
 fsck.cramfs:  libz 
 fsck.minix:  
+fsfreeze:  
+fstrim:  
+getopt:  
+hexdump:  
+hwclock:  
+ionice:  
+ipcmk:  
+ipcrm:  
+ipcs:  
 isosize:  
+kill:  
+ldattach:  
+logger:  
+login:  libpam libpam_misc 
+look:  
+losetup:  
+lscpu:  
+lslocks:  
+mcookie:  
 mkfs:  
 mkfs.bfs:  
 mkfs.cramfs:  libz 
 mkfs.minix:  
 mkswap:  
-raw:  
-cfdisk:  libncursesw libtinfo 
-fdisk:  
-sfdisk:  
-getopt:  
-hwclock:  
-test_at:  
-test_blkdev:  
-test_canonicalize:  
-test_cpuset:  
-test_ismounted:  
-test_loopdev:  
-test_mangle:  
-test_procutils:  
-test_strutils:  
-test_sysfs:  
-test_tt:  
-test_wholedisk:  
-test_islocal:  
-test_logindefs:  
-cal:  libncursesw libtinfo 
-logger:  
-look:  
-lslocks:  
-mcookie:  
+more:  libtinfo 
 namei:  
-rename:  
-whereis:  
-chrt:  
-ionice:  
-taskset:  
-chcpu:  
-ctrlaltdel:  
-cytune:  
-dmesg:  
-fallocate:  
-flock:  
-fsfreeze:  
-fstrim:  
-ipcmk:  
-ipcrm:  
-ipcs:  
-ldattach:  
-losetup:  
-lscpu:  
+pg:  libncursesw libtinfo 
 pivot_root:  
 prlimit:  
+raw:  
 readprofile:  
+rename:  
 renice:  
+rev:  
 rtcwake:  
-setarch:  
-setsid:  
-switch_root:  
-tunelp:  
-unshare:  
-agetty:  
 script:  libutil 
 scriptreplay:  
+setarch:  
+setsid:  
 setterm:  libtinfo 
-wall:  
-test_byteswap:  
-test_md5:  
-test_pathnames:  
-test_sysinfo:  
-col:  
-colcrt:  
-colrm:  
-column:  
-hexdump:  
-more:  libtinfo 
-pg:  libncursesw libtinfo 
-rev:  
+sfdisk:  
+su:  libpam libpam_misc 
+sulogin:  rypt 
+switch_root:  
 tailf:  
+taskset:  
+tunelp:  
 ul:  libtinfo 
+unshare:  
+utmpdump:  
+wall:  
+wdctl:  
+whereis:  

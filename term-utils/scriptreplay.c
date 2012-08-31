@@ -34,7 +34,7 @@
 
 #define SCRIPT_MIN_DELAY 0.0001		/* from original sripreplay.pl */
 
-void __attribute__((__noreturn__))
+static void __attribute__((__noreturn__))
 usage(FILE *out)
 {
 	fputs(_("\nUsage:\n"), out);
@@ -194,10 +194,10 @@ main(int argc, char *argv[])
 
 	tfile = fopen(tname, "r");
 	if (!tfile)
-		err(EXIT_FAILURE, _("cannot open timing file %s"), tname);
+		err(EXIT_FAILURE, _("cannot open %s"), tname);
 	sfile = fopen(sname, "r");
 	if (!sfile)
-		err(EXIT_FAILURE, _("cannot open typescript file %s"), sname);
+		err(EXIT_FAILURE, _("cannot open %s"), sname);
 
 	/* ignore the first typescript line */
 	while((c = fgetc(sfile)) != EOF && c != '\n');

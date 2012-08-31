@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <stdarg.h>
 #include <libmount.h>
+#include <ctype.h>
 
 #include "nls.h"
 #include "c.h"
@@ -43,11 +44,7 @@
 #define OPTUTILS_EXIT_CODE MOUNT_EX_USAGE
 #include "optutils.h"
 
-#define EXCL_ERROR "--{bind,make-*}"
-
 /*** TODO: DOCS:
- *
- *  --guess-fstype	is unsupported
  *
  *  --options-mode={ignore,append,prepend,replace}	MNT_OMODE_{IGNORE, ...}
  *  --options-source={fstab,mtab,disable}		MNT_OMODE_{FSTAB,MTAB,NOTAB}
@@ -134,6 +131,22 @@ static void encrypt_pass_release(struct libmnt_context *cxt
 	munlockall();
 }
 
+/*
+ * Replace control chars with '?' to be compatible with coreutils. For more
+ * robust solution use findmnt(1) where we use \x?? hex encoding.
+ */
+static void safe_fputs(const char *data)
+{
+	const char *p;
+
+	for (p = data; p && *p; p++) {
+		if (iscntrl((unsigned char) *p))
+			fputc('?', stdout);
+		else
+			fputc(*p, stdout);
+	}
+}
+
 static void print_all(struct libmnt_context *cxt, char *pattern, int show_label)
 {
 	struct libmnt_table *tb;
@@ -161,7 +174,9 @@ static void print_all(struct libmnt_context *cxt, char *pattern, int show_label)
 
 		if (!mnt_fs_is_pseudofs(fs))
 			xsrc = mnt_pretty_path(src, cache);
-		printf ("%s on %s", xsrc ? xsrc : src, mnt_fs_get_target(fs));
+		printf ("%s on ", xsrc ? xsrc : src);
+		safe_fputs(mnt_fs_get_target(fs));
+
 		if (type)
 			printf (" type %s", type);
 		if (optstr)
@@ -355,8 +370,19 @@ try_readonly:
 			warnx(_("%s is already mounted"), src);
 			return MOUNT_EX_USAGE;
 		case -MNT_ERR_NOFSTAB:
-			warnx(_("can't find %s in %s"), src ? src : tgt,
+			if (mnt_context_is_swapmatch(cxt)) {
+				warnx(_("can't find %s in %s"),
+						src ? src : tgt,
 						mnt_get_fstab_path());
+				return MOUNT_EX_USAGE;
+			}
+			/* source/target explicitly defined */
+			if (tgt)
+				warnx(_("can't find mountpoint %s in %s"),
+						tgt, mnt_get_fstab_path());
+			else
+				warnx(_("can't find mount source %s in %s"),
+						src, mnt_get_fstab_path());
 			return MOUNT_EX_USAGE;
 		case -MNT_ERR_NOFSTYPE:
 			if (restricted)
@@ -595,7 +621,7 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	fprintf(out, _(
 		" %1$s [-lhV]\n"
 		" %1$s -a [options]\n"
-		" %1$s [options] <source> | <directory>\n"
+		" %1$s [options] [--source] <source> | [--target] <directory>\n"
 		" %1$s [options] <source> <directory>\n"
 		" %1$s <operation> <mountpoint> [<target>]\n"),
 		program_invocation_short_name);
@@ -618,6 +644,9 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	" -p, --pass-fd <num>     read the passphrase from file descriptor\n"
 	" -r, --read-only         mount the filesystem read-only (same as -o ro)\n"
 	" -t, --types <list>      limit the set of filesystem types\n"));
+	fprintf(out, _(
+	"     --source <src>      explicitly specifies source (path, label, uuid)\n"
+	"     --target <target>   explicitly specifies mountpoint\n"));
 	fprintf(out, _(
 	" -v, --verbose           say what is being done\n"
 	" -V, --version           display version information and exit\n"
@@ -667,7 +696,7 @@ int main(int argc, char **argv)
 	int c, rc = MOUNT_EX_SUCCESS, all = 0, show_labels = 0;
 	struct libmnt_context *cxt;
 	struct libmnt_table *fstab = NULL;
-	char *source = NULL, *srcbuf = NULL;
+	char *srcbuf = NULL;
 	char *types = NULL;
 	unsigned long oper = 0;
 
@@ -679,22 +708,10 @@ int main(int argc, char **argv)
 		MOUNT_OPT_RSHARED,
 		MOUNT_OPT_RSLAVE,
 		MOUNT_OPT_RPRIVATE,
-		MOUNT_OPT_RUNBINDABLE
+		MOUNT_OPT_RUNBINDABLE,
+		MOUNT_OPT_TARGET,
+		MOUNT_OPT_SOURCE
 	};
-
-	enum {
-	        EXCL_NONE,
-	        EXCL_BIND,
-	        EXCL_MAKE_SHARED,
-	        EXCL_MAKE_SLAVE,
-	        EXCL_MAKE_PRIVATE,
-	        EXCL_MAKE_UNBINDABLE,
-	        EXCL_MAKE_RSHARED,
-	        EXCL_MAKE_RSLAVE,
-	        EXCL_MAKE_RPRIVATE,
-	        EXCL_MAKE_RUNBINDABLE
-	};
-	int excl_any = EXCL_NONE;
 
 	static const struct option longopts[] = {
 		{ "all", 0, 0, 'a' },
@@ -729,8 +746,22 @@ int main(int argc, char **argv)
 		{ "no-canonicalize", 0, 0, 'c' },
 		{ "internal-only", 0, 0, 'i' },
 		{ "show-labels", 0, 0, 'l' },
+		{ "target", 1, 0, MOUNT_OPT_TARGET },
+		{ "source", 1, 0, MOUNT_OPT_SOURCE },
 		{ NULL, 0, 0, 0 }
 	};
+
+	static const ul_excl_t excl[] = {       /* rows and cols in in ASCII order */
+		{ 'B','M','R',			/* bind,move,rbind */
+		   MOUNT_OPT_SHARED,   MOUNT_OPT_SLAVE,
+		   MOUNT_OPT_PRIVATE,  MOUNT_OPT_UNBINDABLE,
+		   MOUNT_OPT_RSHARED,  MOUNT_OPT_RSLAVE,
+		   MOUNT_OPT_RPRIVATE, MOUNT_OPT_RUNBINDABLE },
+
+		{ 'L','U', MOUNT_OPT_SOURCE },	/* label,uuid,source */
+		{ 0 }
+	};
+	int excl_st[ARRAY_SIZE(excl)] = UL_EXCL_STATUS_INIT;
 
 	sanitize_env();
 	setlocale(LC_ALL, "");
@@ -749,8 +780,13 @@ int main(int argc, char **argv)
 					longopts, NULL)) != -1) {
 
 		/* only few options are allowed for non-root users */
-		if (mnt_context_is_restricted(cxt) && !strchr("hlLUVvpris", c))
+		if (mnt_context_is_restricted(cxt) &&
+		    !strchr("hlLUVvpris", c) &&
+		    c != MOUNT_OPT_TARGET &&
+		    c != MOUNT_OPT_SOURCE)
 			exit_non_root(option_to_longopt(c, longopts));
+
+		err_exclusive_options(c, longopts, excl, excl_st);
 
 		switch(c) {
 		case 'a':
@@ -803,13 +839,16 @@ int main(int argc, char **argv)
 					_("invalid passphrase file descriptor"));
 			break;
 		case 'L':
+			xasprintf(&srcbuf, "LABEL=\"%s\"", optarg);
+			mnt_context_disable_swapmatch(cxt, 1);
+			mnt_context_set_source(cxt, srcbuf);
+			free(srcbuf);
+			break;
 		case 'U':
-			if (source)
-				errx(MOUNT_EX_USAGE, _("only one <source> may be specified"));
-			if (xasprintf(&srcbuf, "%s=\"%s\"",
-				     c == 'L' ? "LABEL" : "UUID", optarg) <= 0)
-				err(MOUNT_EX_SYSERR, _("failed to allocate source buffer"));
-			source = srcbuf;
+			xasprintf(&srcbuf, "UUID=\"%s\"", optarg);
+			mnt_context_disable_swapmatch(cxt, 1);
+			mnt_context_set_source(cxt, srcbuf);
+			free(srcbuf);
 			break;
 		case 'l':
 			show_labels = 1;
@@ -824,7 +863,6 @@ int main(int argc, char **argv)
 			mnt_context_enable_sloppy(cxt, TRUE);
 			break;
 		case 'B':
-			exclusive_option(&excl_any, EXCL_BIND, EXCL_ERROR);
 			oper |= MS_BIND;
 			break;
 		case 'M':
@@ -834,36 +872,36 @@ int main(int argc, char **argv)
 			oper |= (MS_BIND | MS_REC);
 			break;
 		case MOUNT_OPT_SHARED:
-			exclusive_option(&excl_any, EXCL_MAKE_SHARED, EXCL_ERROR);
 			oper |= MS_SHARED;
 			break;
 		case MOUNT_OPT_SLAVE:
-			exclusive_option(&excl_any, EXCL_MAKE_SLAVE, EXCL_ERROR);
 			oper |= MS_SLAVE;
 			break;
 		case MOUNT_OPT_PRIVATE:
-			exclusive_option(&excl_any, EXCL_MAKE_PRIVATE, EXCL_ERROR);
 			oper |= MS_PRIVATE;
 			break;
 		case MOUNT_OPT_UNBINDABLE:
-			exclusive_option(&excl_any, EXCL_MAKE_UNBINDABLE, EXCL_ERROR);
 			oper |= MS_UNBINDABLE;
 			break;
 		case MOUNT_OPT_RSHARED:
-			exclusive_option(&excl_any, EXCL_MAKE_RSHARED, EXCL_ERROR);
 			oper |= (MS_SHARED | MS_REC);
 			break;
 		case MOUNT_OPT_RSLAVE:
-			exclusive_option(&excl_any, EXCL_MAKE_RSLAVE, EXCL_ERROR);
 			oper |= (MS_SLAVE | MS_REC);
 			break;
 		case MOUNT_OPT_RPRIVATE:
-			exclusive_option(&excl_any, EXCL_MAKE_RPRIVATE, EXCL_ERROR);
 			oper |= (MS_PRIVATE | MS_REC);
 			break;
 		case MOUNT_OPT_RUNBINDABLE:
-			exclusive_option(&excl_any, EXCL_MAKE_RUNBINDABLE, EXCL_ERROR);
 			oper |= (MS_UNBINDABLE | MS_REC);
+			break;
+		case MOUNT_OPT_TARGET:
+			mnt_context_disable_swapmatch(cxt, 1);
+			mnt_context_set_target(cxt, optarg);
+			break;
+		case MOUNT_OPT_SOURCE:
+			mnt_context_disable_swapmatch(cxt, 1);
+			mnt_context_set_source(cxt, optarg);
 			break;
 		default:
 			usage(stderr);
@@ -874,14 +912,17 @@ int main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (!source && !argc && !all) {
+	if (!mnt_context_get_source(cxt) &&
+	    !mnt_context_get_target(cxt) &&
+	    !argc &&
+	    !all) {
 		if (oper)
 			usage(stderr);
 		print_all(cxt, types, show_labels);
 		goto done;
 	}
 
-	if (oper && (types || all || source))
+	if (oper && (types || all || mnt_context_get_source(cxt)))
 		usage(stderr);
 
 	if (types && (all || strchr(types, ',') ||
@@ -899,25 +940,31 @@ int main(int argc, char **argv)
 		rc = mount_all(cxt);
 		goto done;
 
-	} else if (argc == 0 && source) {
+	} else if (argc == 0 && (mnt_context_get_source(cxt) ||
+				 mnt_context_get_target(cxt))) {
 		/*
-		 * B) mount -L|-U
+		 * B) mount -L|-U|--source|--target
 		 */
-		mnt_context_set_source(cxt, source);
+		if (mnt_context_is_restricted(cxt) &&
+		    mnt_context_get_source(cxt) &&
+		    mnt_context_get_target(cxt))
+			exit_non_root(NULL);
 
 	} else if (argc == 1) {
 		/*
-		 * C) mount [-L|-U] <target>
+		 * C) mount [-L|-U|--source] <target>
 		 *    mount <source|target>
+		 *
+		 * non-root may specify source *or* target, but not both
 		 */
-		if (source) {
-			if (mnt_context_is_restricted(cxt))
-				exit_non_root(NULL);
-			 mnt_context_set_source(cxt, source);
-		}
+		if (mnt_context_is_restricted(cxt) &&
+		    mnt_context_get_source(cxt))
+			exit_non_root(NULL);
+
 		mnt_context_set_target(cxt, argv[0]);
 
-	} else if (argc == 2 && !source) {
+	} else if (argc == 2 && !mnt_context_get_source(cxt)
+			     && !mnt_context_get_target(cxt)) {
 		/*
 		 * D) mount <source> <target>
 		 */
@@ -925,6 +972,7 @@ int main(int argc, char **argv)
 			exit_non_root(NULL);
 		mnt_context_set_source(cxt, argv[0]);
 		mnt_context_set_target(cxt, argv[1]);
+
 	} else
 		usage(stderr);
 
@@ -940,7 +988,6 @@ int main(int argc, char **argv)
 	rc = mk_exit_code(cxt, rc);
 
 done:
-	free(srcbuf);
 	mnt_free_context(cxt);
 	mnt_free_table(fstab);
 	return rc;

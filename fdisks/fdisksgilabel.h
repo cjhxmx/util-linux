@@ -106,23 +106,17 @@ typedef struct {
 #define SSWAP32(x) (other_endian ? swab32(x) : (uint32_t)(x))
 
 /* fdisk.c */
-#define sgilabel ((sgi_partition *)cxt->mbr)
+#define sgilabel ((sgi_partition *)cxt->firstsector)
 #define sgiparam (sgilabel->devparam)
 
 /* fdisksgilabel.c */
 extern struct	systypes sgi_sys_types[];
-extern int	check_sgi_label(struct fdisk_context *cxt);
 extern void	sgi_list_table( struct fdisk_context *cxt, int xtra );
 extern int  sgi_change_sysid(struct fdisk_context *cxt, int i, int sys);
 extern unsigned int	sgi_get_start_sector(struct fdisk_context *cxt, int i );
 extern unsigned int	sgi_get_num_sectors(struct fdisk_context *cxt, int i );
 extern int	sgi_get_sysid(struct fdisk_context *cxt, int i );
-extern void	sgi_delete_partition( struct fdisk_context *cxt, int i );
-extern void	sgi_add_partition( struct fdisk_context *cxt, int n, int sys );
-extern void	create_sgilabel( struct fdisk_context *cxt );
 extern void	create_sgiinfo(struct fdisk_context *cxt);
-extern int	verify_sgi(struct fdisk_context *cxt, int verbose );
-extern void	sgi_write_table( struct fdisk_context *cxt );
 extern void	sgi_set_ilfact( void );
 extern void	sgi_set_rspeed( void );
 extern void	sgi_set_pcylcount( void );

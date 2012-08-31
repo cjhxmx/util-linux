@@ -57,7 +57,6 @@ usrbin_exec_PROGRAMS += ddate
 dist_man_MANS += misc-utils/ddate.1
 ddate_SOURCES = misc-utils/ddate.c
 ruman1_DATA += man/ru/ddate.1
-EXTRA_DIST += $(ruman1_DATA)
 endif
 
 if BUILD_LSLOCKS
@@ -107,12 +106,7 @@ systemdsystemunit_DATA += \
 endif
 endif # BUILD_UUIDD
 
-EXTRA_DIST += \
-	misc-utils/uuidd.8.in \
-	misc-utils/uuidd.rc.in \
-	misc-utils/uuidd.service.in \
-	misc-utils/uuidd.socket.in
-CLEANFILES += \
+PATHFILES += \
 	misc-utils/uuidd.8 \
 	misc-utils/uuidd.rc \
 	misc-utils/uuidd.service \

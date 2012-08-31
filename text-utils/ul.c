@@ -228,7 +228,7 @@ int main(int argc, char **argv)
 		for (; optind < argc; optind++) {
 			f = fopen(argv[optind],"r");
 			if (!f)
-				err(EXIT_FAILURE, _("%s: open failed"),
+				err(EXIT_FAILURE, _("cannot open %s"),
 				    argv[optind]);
 			filter(f);
 			fclose(f);
@@ -638,11 +638,11 @@ static void setcol(int newcol) {
 		needcol(col);
 }
 
-static void needcol(int col) {
-	maxcol = col;
+static void needcol(int acol) {
+	maxcol = acol;
 
 	/* If col >= obuflen, expand obuf until obuflen > col. */
-	while (col >= obuflen) {
+	while (acol >= obuflen) {
 		/* Paranoid check for obuflen == INT_MAX. */
 		if (obuflen == INT_MAX)
 			errx(EXIT_FAILURE, _("Input line too long."));

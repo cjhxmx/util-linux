@@ -1219,7 +1219,7 @@ int blkid_probe_vsprintf_value(blkid_probe pr, const char *name,
 
 	len = vsnprintf((char *) v->data, sizeof(v->data), fmt, ap);
 
-	if (len <= 0 || len >= sizeof(v->data)) {
+	if (len <= 0 || (size_t) len >= sizeof(v->data)) {
 		blkid_probe_reset_last_value(pr);
 		return -1;
 	}
@@ -1256,7 +1256,7 @@ int blkid_probe_set_magic(blkid_probe pr, blkid_loff_t offset,
 		rc = blkid_probe_set_value(pr, "SBMAGIC", magic, len);
 		if (!rc)
 			rc = blkid_probe_sprintf_value(pr,
-					"SBMAGIC_OFFSET", "%llu", offset);
+					"SBMAGIC_OFFSET", "%llu", (unsigned long long)offset);
 		break;
 	case BLKID_CHAIN_PARTS:
 		if (!(chn->flags & BLKID_PARTS_MAGIC))
@@ -1264,7 +1264,7 @@ int blkid_probe_set_magic(blkid_probe pr, blkid_loff_t offset,
 		rc = blkid_probe_set_value(pr, "PTMAGIC", magic, len);
 		if (!rc)
 			rc = blkid_probe_sprintf_value(pr,
-					"PTMAGIC_OFFSET", "%llu", offset);
+					"PTMAGIC_OFFSET", "%llu", (unsigned long long)offset);
 		break;
 	default:
 		break;

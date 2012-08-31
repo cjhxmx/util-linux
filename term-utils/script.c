@@ -205,7 +205,7 @@ main(int argc, char **argv) {
 		case 't':
 			if (optarg)
 				if ((timingfd = fopen(optarg, "w")) == NULL)
-					err(EXIT_FAILURE, _("cannot open timing file %s"), optarg);
+					err(EXIT_FAILURE, _("cannot open %s"), optarg);
 			tflg = 1;
 			break;
 		case 'V':
@@ -230,7 +230,7 @@ main(int argc, char **argv) {
 		die_if_link(fname);
 	}
 	if ((fscript = fopen(fname, aflg ? "a" : "w")) == NULL) {
-		warn(_("open failed: %s"), fname);
+		warn(_("cannot open %s"), fname);
 		fail();
 	}
 
@@ -289,7 +289,7 @@ main(int argc, char **argv) {
 	return EXIT_SUCCESS;
 }
 
-void
+void __attribute__((__noreturn__))
 doinput(void) {
 	ssize_t cc;
 	char ibuf[BUFSIZ];
@@ -345,7 +345,7 @@ my_strftime(char *buf, size_t len, const char *fmt, const struct tm *tm) {
 	strftime(buf, len, fmt, tm);
 }
 
-void
+void __attribute__((__noreturn__))
 dooutput(FILE *timingfd) {
 	ssize_t cc;
 	time_t tvec;
@@ -412,7 +412,7 @@ dooutput(FILE *timingfd) {
 	done();
 }
 
-void
+void __attribute__((__noreturn__))
 doshell(void) {
 	char *shname;
 
@@ -462,14 +462,14 @@ fixtty(void) {
 	tcsetattr(STDIN_FILENO, TCSANOW, &rtt);
 }
 
-void
+void __attribute__((__noreturn__))
 fail(void) {
 
 	kill(0, SIGTERM);
 	done();
 }
 
-void
+void __attribute__((__noreturn__))
 done(void) {
 	time_t tvec;
 
@@ -557,7 +557,7 @@ getslave(void) {
 	line[strlen("/dev/")] = 't';
 	slave = open(line, O_RDWR);
 	if (slave < 0) {
-		warn(_("open failed: %s"), line);
+		warn(_("cannot open %s"), line);
 		fail();
 	}
 	tcsetattr(slave, TCSANOW, &tt);

@@ -643,6 +643,7 @@ int main(int argc, char **argv)
 	char *type = NULL;
 	char *device = NULL; /* pointer to argv[], ie: /dev/sda1 */
 	char *wholedisk = NULL; /* allocated, ie: /dev/sda */
+	char *outarg = NULL;
 	dev_t disk_devno = 0, part_devno = 0;
 
 	static const struct option long_opts[] = {
@@ -663,6 +664,12 @@ int main(int argc, char **argv)
 		{ NULL, 0, NULL, 0 }
 	};
 
+	static const ul_excl_t excl[] = {	/* rows and cols in in ASCII order */
+		{ 'P','a','d','l','r','s' },
+		{ 0 }
+	};
+	int excl_st[ARRAY_SIZE(excl)] = UL_EXCL_STATUS_INIT;
+
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
@@ -670,44 +677,42 @@ int main(int argc, char **argv)
 
 	while ((c = getopt_long(argc, argv,
 				"abdglrsvn:t:o:PhV", long_opts, NULL)) != -1) {
+
+		err_exclusive_options(c, long_opts, excl, excl_st);
+
 		switch(c) {
 		case 'a':
-			exclusive_option(&what, ACT_ADD, ACT_ERROR);
+			what = ACT_ADD;
 			break;
 		case 'b':
 			partx_flags |= FL_BYTES;
 			break;
 		case 'd':
-			exclusive_option(&what, ACT_DELETE, ACT_ERROR);
+			what = ACT_DELETE;
 			break;
 		case 'g':
 			tt_flags |= TT_FL_NOHEADINGS;
 			break;
 		case 'l':
-			exclusive_option(&what, ACT_LIST, ACT_ERROR);
+			what = ACT_LIST;
 			break;
 		case 'n':
 			if (parse_range(optarg, &lower, &upper, 0))
 				errx(EXIT_FAILURE, _("failed to parse --nr <M-N> range"));
 			break;
 		case 'o':
-			ncolumns = string_to_idarray(optarg,
-						columns, ARRAY_SIZE(columns),
-						column_name_to_id);
-			if (ncolumns < 0)
-				return EXIT_FAILURE;
-			exclusive_option(&what, ACT_SHOW, ACT_ERROR);
+			outarg = optarg;
 			break;
 		case 'P':
 			tt_flags |= TT_FL_EXPORT;
-			exclusive_option(&what, ACT_SHOW, ACT_ERROR);
+			what = ACT_SHOW;
 			break;
 		case 'r':
 			tt_flags |= TT_FL_RAW;
-			exclusive_option(&what, ACT_SHOW, ACT_ERROR);
+			what = ACT_SHOW;
 			break;
 		case 's':
-			exclusive_option(&what, ACT_SHOW, ACT_ERROR);
+			what = ACT_SHOW;
 			break;
 		case 't':
 			type = optarg;
@@ -740,6 +745,11 @@ int main(int argc, char **argv)
 		columns[ncolumns++] = COL_UUID;
 	}
 
+	if (what == ACT_SHOW && outarg &&
+	    string_add_to_idarray(outarg, columns, ARRAY_SIZE(columns),
+				   &ncolumns, column_name_to_id) < 0)
+		return EXIT_FAILURE;
+
 	/*
 	 * Note that 'partx /dev/sda1' == 'partx /dev/sda1 /dev/sda'
 	 * so assume that the device and/or disk are always the last
@@ -766,7 +776,7 @@ int main(int argc, char **argv)
 		device = argv[optind];
 
 		if (stat(device, &sb))
-			err(EXIT_FAILURE, _("%s: stat failed"), device);
+			err(EXIT_FAILURE, _("stat failed %s"), device);
 
 		part_devno = sb.st_rdev;
 
@@ -827,7 +837,7 @@ int main(int argc, char **argv)
 			errx(EXIT_FAILURE, _("%s: not a block device"), wholedisk);
 	}
 	if ((fd = open(wholedisk, O_RDONLY)) == -1)
-		err(EXIT_FAILURE, _("%s: open failed"), wholedisk);
+		err(EXIT_FAILURE, _("cannot open %s"), wholedisk);
 
 	if (what == ACT_DELETE)
 		rc = del_parts(fd, wholedisk, disk_devno, lower, upper);

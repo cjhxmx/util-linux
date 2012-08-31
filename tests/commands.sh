@@ -1,7 +1,3 @@
-
-top_builddir=@abs_top_builddir@
-top_srcdir=@abs_top_srcdir@
-
 # Misc settings
 TS_TESTUSER=${TS_TESTUSER:-"test"}
 
@@ -16,19 +12,19 @@ TS_HELPER_STRUTILS="$top_builddir/test_strutils"
 TS_HELPER_CPUSET="$top_builddir/test_cpuset"
 
 # libmount
-TS_HELPER_LIBMOUNT_OPTSTR="$top_builddir/test_optstr"
-TS_HELPER_LIBMOUNT_TAB="$top_builddir/test_tab"
-TS_HELPER_LIBMOUNT_UTILS="$top_builddir/test_utils"
-TS_HELPER_LIBMOUNT_LOCK="$top_builddir/test_lock"
-TS_HELPER_LIBMOUNT_UPDATE="$top_builddir/test_tab_update"
-TS_HELPER_LIBMOUNT_CONTEXT="$top_builddir/test_context"
-TS_HELPER_LIBMOUNT_TABDIFF="$top_builddir/test_tab_diff"
+TS_HELPER_LIBMOUNT_OPTSTR="$top_builddir/test_mount_optstr"
+TS_HELPER_LIBMOUNT_TAB="$top_builddir/test_mount_tab"
+TS_HELPER_LIBMOUNT_UTILS="$top_builddir/test_mount_utils"
+TS_HELPER_LIBMOUNT_LOCK="$top_builddir/test_mount_lock"
+TS_HELPER_LIBMOUNT_UPDATE="$top_builddir/test_mount_tab_update"
+TS_HELPER_LIBMOUNT_CONTEXT="$top_builddir/test_mount_context"
+TS_HELPER_LIBMOUNT_TABDIFF="$top_builddir/test_mount_tab_diff"
 
 TS_HELPER_ISLOCAL="$top_builddir/test_islocal"
 TS_HELPER_LOGINDEFS="$top_builddir/test_logindefs"
 
 # TODO: use partx
-TS_HELPER_PARTITIONS="$top_builddir/samples-partitions"
+TS_HELPER_PARTITIONS="$top_builddir/sample-partitions"
 
 # paths to commands
 TS_CMD_MOUNT=${TS_CMD_MOUNT:-"$top_builddir/mount"}

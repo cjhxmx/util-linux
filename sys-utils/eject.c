@@ -398,13 +398,13 @@ static void close_tray(int fd)
 static int eject_cdrom(int fd)
 {
 #if defined(CDROMEJECT)
-	return ioctl(fd, CDROMEJECT);
+	return ioctl(fd, CDROMEJECT) >= 0;
 #elif defined(CDIOCEJECT)
-	return ioctl(fd, CDIOCEJECT);
+	return ioctl(fd, CDIOCEJECT) >= 0;
 #else
 	warnx(_("CD-ROM eject unsupported"));
 	errno = ENOSYS;
-	return -1;
+	return 0;
 #endif
 }
 
@@ -432,7 +432,7 @@ static void toggle_tray(int fd)
 
 	case CDS_NO_DISC:
 	case CDS_DISC_OK:
-		if (eject_cdrom(fd))
+		if (!eject_cdrom(fd))
 			err(EXIT_FAILURE, _("CD-ROM eject command failed"));
 		return;
 	case CDS_NO_INFO:
@@ -453,7 +453,7 @@ static void toggle_tray(int fd)
 	gettimeofday(&time_start, NULL);
 
 	/* Send the CDROMEJECT command to the device. */
-	if (eject_cdrom(fd) < 0)
+	if (!eject_cdrom(fd))
 		err(EXIT_FAILURE, _("CD-ROM eject command failed"));
 
 	/* Get the second timestamp, to measure the time needed to open
@@ -497,7 +497,7 @@ static int read_speed(const char *devname)
 
 	f = fopen(_PATH_PROC_CDROMINFO, "r");
 	if (!f)
-		err(EXIT_FAILURE, _("%s: open failed"), _PATH_PROC_CDROMINFO);
+		err(EXIT_FAILURE, _("cannot open %s"), _PATH_PROC_CDROMINFO);
 
 	name = rindex(devname, '/') + 1;
 
@@ -526,7 +526,6 @@ static int read_speed(const char *devname)
 		} else {
 			if (strncmp(line, "drive speed:", 12) == 0) {
 				int i;
-				char *str;
 
 				str = strtok(&line[12], "\t ");
 				for (i = 1; i < drive_number; i++)
@@ -689,7 +688,7 @@ static int open_device(const char *name)
 	if (fd < 0)
 		fd = open(name, O_RDONLY|O_NONBLOCK);
 	if (fd == -1)
-		err(EXIT_FAILURE, _("%s: open failed"), name);
+		err(EXIT_FAILURE, _("cannot open %s"), name);
 	return fd;
 }
 
@@ -907,7 +906,7 @@ done:
 
 
 /* handle -x option */
-void set_device_speed(char *name)
+static void set_device_speed(char *name)
 {
 	int fd;
 

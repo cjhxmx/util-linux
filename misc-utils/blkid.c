@@ -399,17 +399,17 @@ static int print_udev_ambivalent(blkid_probe pr)
 	int count = 0, rc = -1;
 
 	while (!blkid_do_probe(pr)) {
-		const char *usage = NULL, *type = NULL, *version = NULL;
+		const char *usage_txt = NULL, *type = NULL, *version = NULL;
 		char enc[256];
 
-		blkid_probe_lookup_value(pr, "USAGE", &usage, NULL);
+		blkid_probe_lookup_value(pr, "USAGE", &usage_txt, NULL);
 		blkid_probe_lookup_value(pr, "TYPE", &type, NULL);
 		blkid_probe_lookup_value(pr, "VERSION", &version, NULL);
 
-		if (!usage || !type)
+		if (!usage_txt || !type)
 			continue;
 
-		blkid_encode_string(usage, enc, sizeof(enc));
+		blkid_encode_string(usage_txt, enc, sizeof(enc));
 		if (append_str(&val, &valsz, enc, ":"))
 			goto done;
 
@@ -675,17 +675,20 @@ int main(int argc, char **argv)
 	int c;
 	uintmax_t offset = 0, size = 0;
 
-	enum {
-		EXCL_NONE,
-		EXCL_NAMES,
-		EXCL_USAGE
+	static const ul_excl_t excl[] = {       /* rows and cols in in ASCII order */
+		{ 'n','u' },
+		{ 0 }
 	};
-	int excl_opt = EXCL_NONE;
+	int excl_st[ARRAY_SIZE(excl)] = UL_EXCL_STATUS_INIT;
 
 	show[0] = NULL;
 	atexit(close_stdout);
 
-	while ((c = getopt (argc, argv, "c:df:ghilL:n:ko:O:ps:S:t:u:U:w:v")) != EOF)
+	while ((c = getopt (argc, argv,
+			    "c:df:ghilL:n:ko:O:ps:S:t:u:U:w:v")) != EOF) {
+
+		err_exclusive_options(c, NULL, excl, excl_st);
+
 		switch (c) {
 		case 'c':
 			if (optarg && !*optarg)
@@ -702,11 +705,9 @@ int main(int argc, char **argv)
 			search_type = strdup("LABEL");
 			break;
 		case 'n':
-			exclusive_option(&excl_opt, EXCL_NAMES, "-{u,n}");
 			fltr_type = list_to_types(optarg, &fltr_flag);
 			break;
 		case 'u':
-			exclusive_option(&excl_opt, EXCL_USAGE, "-{u,n}");
 			fltr_usage = list_to_usage(optarg, &fltr_flag);
 			break;
 		case 'U':
@@ -794,6 +795,7 @@ int main(int argc, char **argv)
 		default:
 			usage(err);
 		}
+	}
 
 
 	/* The rest of the args are device names */

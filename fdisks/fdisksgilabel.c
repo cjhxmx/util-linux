@@ -33,10 +33,13 @@
 #include "common.h"
 #include "fdisk.h"
 #include "fdisksgilabel.h"
+#include "fdiskdoslabel.h"
 
 static	int     other_endian = 0;
 static	int     debug = 0;
 static  short volumes=1;
+
+static sgiinfo *fill_sgiinfo(void);
 
 /*
  * only dealing with free blocks here
@@ -127,8 +130,8 @@ two_s_complement_32bit_sum(unsigned int *base, int size /* in bytes */) {
 	return sum;
 }
 
-int
-check_sgi_label(struct fdisk_context *cxt) {
+static int
+sgi_probe_label(struct fdisk_context *cxt) {
 	if (sizeof(sgilabel) > 512) {
 		fprintf(stderr,
 			_("According to MIPS Computer Systems, Inc the "
@@ -151,7 +154,6 @@ check_sgi_label(struct fdisk_context *cxt) {
 		fprintf(stderr,
 			_("Detected sgi disklabel with wrong checksum.\n"));
 	}
-	update_units(cxt);
 	disklabel = SGI_LABEL;
 	partitions= 16;
 	volumes = 15;
@@ -328,10 +330,11 @@ create_sgiinfo(struct fdisk_context *cxt) {
 	strncpy((char *) sgilabel->directory[0].vol_file_name, "sgilabel", 8);
 }
 
-sgiinfo *fill_sgiinfo(void);
 
-void
-sgi_write_table(struct fdisk_context *cxt) {
+static int sgi_write_disklabel(struct fdisk_context *cxt)
+{
+	sgiinfo *info = NULL;
+
 	sgilabel->csum = 0;
 	sgilabel->csum = SSWAP32(two_s_complement_32bit_sum(
 		(unsigned int*)sgilabel,
@@ -339,23 +342,34 @@ sgi_write_table(struct fdisk_context *cxt) {
 	assert(two_s_complement_32bit_sum(
 		(unsigned int*)sgilabel, sizeof(*sgilabel)) == 0);
 	if (lseek(cxt->dev_fd, 0, SEEK_SET) < 0)
-		fatal(cxt, unable_to_seek);
+		goto err;
 	if (write(cxt->dev_fd, sgilabel, SECTOR_SIZE) != SECTOR_SIZE)
-		fatal(cxt, unable_to_write);
-	if (! strncmp((char *) sgilabel->directory[0].vol_file_name, "sgilabel", 8)) {
+		goto err;
+	if (!strncmp((char *) sgilabel->directory[0].vol_file_name, "sgilabel", 8)) {
 		/*
 		 * keep this habit of first writing the "sgilabel".
 		 * I never tested whether it works without (AN 981002).
 		 */
-		sgiinfo *info = fill_sgiinfo();
-		int infostartblock = SSWAP32(sgilabel->directory[0].vol_file_start);
-		if (lseek(cxt->dev_fd, (off_t) infostartblock*
-				SECTOR_SIZE, SEEK_SET) < 0)
-			fatal(cxt, unable_to_seek);
+		int infostartblock
+			= SSWAP32(sgilabel->directory[0].vol_file_start);
+
+		if (lseek(cxt->dev_fd, (off_t) infostartblock *
+						SECTOR_SIZE, SEEK_SET) < 0)
+			goto err;
+
+		info = fill_sgiinfo();
+		if (!info)
+			goto err;
+
 		if (write(cxt->dev_fd, info, SECTOR_SIZE) != SECTOR_SIZE)
-			fatal(cxt, unable_to_write);
-		free(info);
+			goto err;
 	}
+
+	free(info);
+	return 0;
+err:
+	free(info);
+	return -errno;
 }
 
 static int
@@ -375,17 +389,6 @@ compare_start(struct fdisk_context *cxt, const void *x, const void *y) {
 	if (a == b)
 		return (d > c) ? 1 : (d == c) ? 0 : -1;
 	return (a > b) ? 1 : -1;
-}
-
-static int
-sgi_gaps(struct fdisk_context *cxt) {
-	/*
-	 * returned value is:
-	 *  = 0 : disk is properly filled to the rim
-	 *  < 0 : there is an overlap
-	 *  > 0 : there is still some vacant space
-	 */
-	return verify_sgi(cxt, 0);
 }
 
 static void generic_swap(void *a, void *b, int size)
@@ -436,13 +439,11 @@ static void sort(void *base, size_t num, size_t size, struct fdisk_context *cxt,
 	}
 }
 
-
-int
-verify_sgi(struct fdisk_context *cxt, int verbose)
+static int sgi_verify_disklabel(struct fdisk_context *cxt)
 {
 	int Index[16];		/* list of valid partitions */
 	int sortcount = 0;	/* number of used partitions, i.e. non-zero lengths */
-	int entire = 0, i = 0;
+	int entire = 0, i = 0, verbose = 1;
 	unsigned int start = 0;
 	long long gap = 0;	/* count unused blocks */
 	unsigned int lastblock = sgi_get_lastblock(cxt);
@@ -561,6 +562,17 @@ verify_sgi(struct fdisk_context *cxt, int verbose)
 	return (gap > 0) ? 1 : (gap == 0) ? 0 : -1;
 }
 
+static int
+sgi_gaps(struct fdisk_context *cxt) {
+	/*
+	 * returned value is:
+	 *  = 0 : disk is properly filled to the rim
+	 *  < 0 : there is an overlap
+	 *  > 0 : there is still some vacant space
+	 */
+	return sgi_verify_disklabel(cxt);
+}
+
 int
 sgi_change_sysid(struct fdisk_context *cxt, int i, int sys)
 {
@@ -638,14 +650,12 @@ sgi_set_volhdr(struct fdisk_context *cxt)
 	}
 }
 
-void
-sgi_delete_partition(struct fdisk_context *cxt, int i)
+static void sgi_delete_partition(struct fdisk_context *cxt, int partnum)
 {
-	sgi_set_partition(cxt, i, 0, 0, 0);
+	sgi_set_partition(cxt, partnum, 0, 0, 0);
 }
 
-void
-sgi_add_partition(struct fdisk_context *cxt, int n, int sys)
+static void sgi_add_partition(struct fdisk_context *cxt, int n, int sys)
 {
 	char mesg[256];
 	unsigned int first=0, last=0;
@@ -714,8 +724,7 @@ sgi_add_partition(struct fdisk_context *cxt, int n, int sys)
 	sgi_set_partition(cxt, n, first, last-first, sys);
 }
 
-void
-create_sgilabel(struct fdisk_context *cxt)
+static int sgi_create_disklabel(struct fdisk_context *cxt)
 {
 	struct hd_geometry geometry;
 	struct {
@@ -760,9 +769,13 @@ create_sgilabel(struct fdisk_context *cxt)
 			  " > 33.8 GB.\n"), cxt->dev_path, cxt->geom.cylinders);
 	}
 #endif
+	/*
+	 * Convert old MBR to SGI label, make it DEPRECATED, this feature
+	 * has to be handled in by any top-level fdisk command.
+	 */
 	for (i = 0; i < 4; i++) {
 		old[i].sysid = 0;
-		if (valid_part_table_flag(cxt->mbr)) {
+		if (mbr_is_valid_magic(cxt->firstsector)) {
 			if (get_part_table(i)->sys_ind) {
 				old[i].sysid = get_part_table(i)->sys_ind;
 				old[i].start = get_start_sect(get_part_table(i));
@@ -780,7 +793,7 @@ create_sgilabel(struct fdisk_context *cxt)
 			break;
 		}
 
-	fdisk_mbr_zeroize(cxt);
+	fdisk_zeroize_firstsector(cxt);
 	sgilabel->magic = SSWAP32(SGI_LABEL_MAGIC);
 	sgilabel->boot_part = SSWAP16(0);
 	sgilabel->swap_part = SSWAP16(1);
@@ -827,6 +840,7 @@ create_sgilabel(struct fdisk_context *cxt)
 			sgi_set_partition(cxt, i, old[i].start, old[i].nsect, old[i].sysid);
 		}
 	}
+	return 0;
 }
 
 void
@@ -862,10 +876,13 @@ sgi_set_ncyl(void)
 /* _____________________________________________________________
  */
 
-sgiinfo *
-fill_sgiinfo(void)
+static sgiinfo *fill_sgiinfo(void)
 {
-	sgiinfo *info=xcalloc(1, sizeof(sgiinfo));
+	sgiinfo *info = xcalloc(1, sizeof(sgiinfo));
+
+	if (!info)
+		return NULL;
+
 	info->magic=SSWAP32(SGI_INFO_MAGIC);
 	info->b1=SSWAP32(-1);
 	info->b2=SSWAP16(-1);
@@ -877,3 +894,14 @@ fill_sgiinfo(void)
 	strcpy((char *) info->installer, "Sfx version 5.3, Oct 18, 1994");
 	return info;
 }
+
+const struct fdisk_label sgi_label =
+{
+	.name = "sgi",
+	.probe = sgi_probe_label,
+	.write = sgi_write_disklabel,
+	.verify = sgi_verify_disklabel,
+	.create = sgi_create_disklabel,
+	.part_add = sgi_add_partition,
+	.part_delete = sgi_delete_partition,
+};

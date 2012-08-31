@@ -61,10 +61,7 @@
 #define DKTYPENAMES
 #include "fdiskbsdlabel.h"
 
-static void xbsd_delete_part (void);
-static void xbsd_new_part (struct fdisk_context *cxt);
-static void xbsd_write_disklabel (struct fdisk_context *cxt);
-static int xbsd_create_disklabel (struct fdisk_context *cxt);
+static void xbsd_delete_part (struct fdisk_context *cxt, int partnum);
 static void xbsd_edit_disklabel (void);
 static void xbsd_write_bootstrap (struct fdisk_context *cxt);
 static void xbsd_change_fstype (void);
@@ -109,8 +106,8 @@ static struct xbsd_disklabel xbsd_dlabel;
  * Note: often reformatting with DOS-type label leaves the BSD magic,
  * so this does not mean that there is a BSD disk label.
  */
-int
-check_osf_label(struct fdisk_context *cxt) {
+static int
+osf_probe_label(struct fdisk_context *cxt) {
 	if (xbsd_readlabel (cxt, NULL, &xbsd_dlabel) == 0)
 		return 0;
 	return 1;
@@ -139,6 +136,91 @@ is_bsd_partition_type(int type) {
 		type == hidden(NETBSD_PARTITION));
 }
 #endif
+
+static int xbsd_write_disklabel (struct fdisk_context *cxt)
+{
+#if defined (__alpha__)
+	printf (_("Writing disklabel to %s.\n"), cxt->dev_path);
+	xbsd_writelabel (cxt, NULL, &xbsd_dlabel);
+#else
+	printf (_("Writing disklabel to %s.\n"),
+		partname(cxt->dev_path, xbsd_part_index+1, 0));
+	xbsd_writelabel (cxt, xbsd_part, &xbsd_dlabel);
+#endif
+	reread_partition_table(cxt, 0);	/* no exit yet */
+
+	return 0;
+}
+
+static void xbsd_add_part (struct fdisk_context *cxt,
+		int partnum __attribute__((__unused__)),
+		int parttype __attribute__((__unused__)))
+{
+	unsigned int begin, end;
+	char mesg[256];
+	int i;
+
+	if (!xbsd_check_new_partition (&i))
+		return;
+
+#if !defined (__alpha__) && !defined (__powerpc__) && !defined (__hppa__)
+	begin = get_start_sect(xbsd_part);
+	end = begin + get_nr_sects(xbsd_part) - 1;
+#else
+	begin = 0;
+	end = xbsd_dlabel.d_secperunit - 1;
+#endif
+
+	snprintf (mesg, sizeof(mesg), _("First %s"), str_units(SINGULAR));
+	begin = read_int (cxt, bsd_cround (begin), bsd_cround (begin), bsd_cround (end),
+			  0, mesg);
+
+	if (display_in_cyl_units)
+		begin = (begin - 1) * xbsd_dlabel.d_secpercyl;
+
+	snprintf (mesg, sizeof(mesg), _("Last %s or +size or +sizeM or +sizeK"),
+		  str_units(SINGULAR));
+	end = read_int (cxt, bsd_cround (begin), bsd_cround (end), bsd_cround (end),
+			bsd_cround (begin), mesg);
+
+	if (display_in_cyl_units)
+		end = end * xbsd_dlabel.d_secpercyl - 1;
+
+	xbsd_dlabel.d_partitions[i].p_size   = end - begin + 1;
+	xbsd_dlabel.d_partitions[i].p_offset = begin;
+	xbsd_dlabel.d_partitions[i].p_fstype = BSD_FS_UNUSED;
+}
+
+static int xbsd_create_disklabel (struct fdisk_context *cxt)
+{
+	char c;
+
+#if defined (__alpha__)
+	fprintf (stderr, _("%s contains no disklabel.\n"), cxt->dev_path);
+#else
+	fprintf (stderr, _("%s contains no disklabel.\n"),
+		 partname(cxt->dev_path, xbsd_part_index+1, 0));
+#endif
+
+	while (1) {
+		c = read_char (_("Do you want to create a disklabel? (y/n) "));
+		if (tolower(c) == 'y') {
+			if (xbsd_initlabel (cxt,
+#if defined (__alpha__) || defined (__powerpc__) || defined (__hppa__) || \
+    defined (__s390__) || defined (__s390x__)
+				NULL, &xbsd_dlabel, 0
+#else
+				xbsd_part, &xbsd_dlabel, xbsd_part_index
+#endif
+				) == 1) {
+				xbsd_print_disklabel (cxt, 1);
+				return 1;
+			} else
+				return 0;
+		} else if (c == 'n')
+			return 0;
+	}
+}
 
 void
 bsd_command_prompt (struct fdisk_context *cxt)
@@ -184,8 +266,8 @@ bsd_command_prompt (struct fdisk_context *cxt)
     putchar ('\n');
     switch (tolower (read_char (_("BSD disklabel command (m for help): ")))) {
       case 'd':
-	xbsd_delete_part ();
-	break;
+	      xbsd_delete_part(cxt, xbsd_get_part_index(xbsd_dlabel.d_npartitions));
+	      break;
       case 'e':
 	xbsd_edit_disklabel ();
 	break;
@@ -196,8 +278,8 @@ bsd_command_prompt (struct fdisk_context *cxt)
 	xbsd_list_types ();
 	break;
       case 'n':
-	xbsd_new_part (cxt);
-	break;
+	      xbsd_add_part (cxt, 0, 0);
+	      break;
       case 'p':
 	      xbsd_print_disklabel (cxt, 0);
 	break;
@@ -230,56 +312,15 @@ bsd_command_prompt (struct fdisk_context *cxt)
   }
 }
 
-static void
-xbsd_delete_part (void)
+static void xbsd_delete_part(struct fdisk_context *cxt __attribute__((__unused__)),
+			     int partnum)
 {
-  int i;
-
-  i = xbsd_get_part_index (xbsd_dlabel.d_npartitions);
-  xbsd_dlabel.d_partitions[i].p_size   = 0;
-  xbsd_dlabel.d_partitions[i].p_offset = 0;
-  xbsd_dlabel.d_partitions[i].p_fstype = BSD_FS_UNUSED;
-  if (xbsd_dlabel.d_npartitions == i + 1)
-    while (xbsd_dlabel.d_partitions[xbsd_dlabel.d_npartitions-1].p_size == 0)
-      xbsd_dlabel.d_npartitions--;
-}
-
-static void
-xbsd_new_part (struct fdisk_context *cxt)
-{
-  unsigned int begin, end;
-  char mesg[256];
-  int i;
-
-  if (!xbsd_check_new_partition (&i))
-    return;
-
-#if !defined (__alpha__) && !defined (__powerpc__) && !defined (__hppa__)
-  begin = get_start_sect(xbsd_part);
-  end = begin + get_nr_sects(xbsd_part) - 1;
-#else
-  begin = 0;
-  end = xbsd_dlabel.d_secperunit - 1;
-#endif
-
-  snprintf (mesg, sizeof(mesg), _("First %s"), str_units(SINGULAR));
-  begin = read_int (cxt, bsd_cround (begin), bsd_cround (begin), bsd_cround (end),
-		    0, mesg);
-
-  if (display_in_cyl_units)
-    begin = (begin - 1) * xbsd_dlabel.d_secpercyl;
-
-  snprintf (mesg, sizeof(mesg), _("Last %s or +size or +sizeM or +sizeK"),
-	   str_units(SINGULAR));
-  end = read_int (cxt, bsd_cround (begin), bsd_cround (end), bsd_cround (end),
-		  bsd_cround (begin), mesg);
-
-  if (display_in_cyl_units)
-    end = end * xbsd_dlabel.d_secpercyl - 1;
-
-  xbsd_dlabel.d_partitions[i].p_size   = end - begin + 1;
-  xbsd_dlabel.d_partitions[i].p_offset = begin;
-  xbsd_dlabel.d_partitions[i].p_fstype = BSD_FS_UNUSED;
+	xbsd_dlabel.d_partitions[partnum].p_size   = 0;
+	xbsd_dlabel.d_partitions[partnum].p_offset = 0;
+	xbsd_dlabel.d_partitions[partnum].p_fstype = BSD_FS_UNUSED;
+	if (xbsd_dlabel.d_npartitions == partnum + 1)
+		while (!xbsd_dlabel.d_partitions[xbsd_dlabel.d_npartitions-1].p_size)
+			xbsd_dlabel.d_npartitions--;
 }
 
 void
@@ -378,50 +419,6 @@ xbsd_print_disklabel (struct fdisk_context *cxt, int show_all) {
       fprintf(f, "\n");
     }
   }
-}
-
-static void
-xbsd_write_disklabel (struct fdisk_context *cxt) {
-#if defined (__alpha__)
-	printf (_("Writing disklabel to %s.\n"), cxt->dev_path);
-	xbsd_writelabel (cxt, NULL, &xbsd_dlabel);
-#else
-	printf (_("Writing disklabel to %s.\n"),
-		partname(cxt->dev_path, xbsd_part_index+1, 0));
-	xbsd_writelabel (cxt, xbsd_part, &xbsd_dlabel);
-#endif
-	reread_partition_table(cxt, 0);	/* no exit yet */
-}
-
-static int
-xbsd_create_disklabel (struct fdisk_context *cxt) {
-	char c;
-
-#if defined (__alpha__)
-	fprintf (stderr, _("%s contains no disklabel.\n"), cxt->dev_path);
-#else
-	fprintf (stderr, _("%s contains no disklabel.\n"),
-		 partname(cxt->dev_path, xbsd_part_index+1, 0));
-#endif
-
-	while (1) {
-		c = read_char (_("Do you want to create a disklabel? (y/n) "));
-		if (tolower(c) == 'y') {
-			if (xbsd_initlabel (cxt,
-#if defined (__alpha__) || defined (__powerpc__) || defined (__hppa__) || \
-    defined (__s390__) || defined (__s390x__)
-				NULL, &xbsd_dlabel, 0
-#else
-				xbsd_part, &xbsd_dlabel, xbsd_part_index
-#endif
-				) == 1) {
-				xbsd_print_disklabel (cxt, 1);
-				return 1;
-			} else
-				return 0;
-		} else if (c == 'n')
-			return 0;
-	}
 }
 
 static int
@@ -845,3 +842,14 @@ alpha_bootblock_checksum (char *boot)
   dp[63] = sum;
 }
 #endif /* __alpha__ */
+
+const struct fdisk_label bsd_label =
+{
+	.name = "bsd",
+	.probe = osf_probe_label,
+	.write = xbsd_write_disklabel,
+	.verify = NULL,
+	.create = xbsd_create_disklabel,
+	.part_add = xbsd_add_part,
+	.part_delete = xbsd_delete_part,
+};

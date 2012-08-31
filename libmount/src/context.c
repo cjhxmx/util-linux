@@ -502,7 +502,7 @@ int mnt_context_disable_mtab(struct libmnt_context *cxt, int disable)
 }
 
 /**
- * mnt_context_is_nomtab
+ * mnt_context_is_nomtab:
  * @cxt: mount context
  *
  * Returns: 1 if no-mtab is enabled or 0
@@ -510,6 +510,32 @@ int mnt_context_disable_mtab(struct libmnt_context *cxt, int disable)
 int mnt_context_is_nomtab(struct libmnt_context *cxt)
 {
 	return cxt && (cxt->flags & MNT_FL_NOMTAB) ? 1 : 0;
+}
+
+/**
+ * mnt_context_disable_swapmatch:
+ * @cxt: mount context
+ * @disable: TRUE or FALSE
+ *
+ * Disable/enable swap between source and target for mount(8) if only one path
+ * is specified.
+ *
+ * Returns: 0 on success, negative number in case of error.
+ */
+int mnt_context_disable_swapmatch(struct libmnt_context *cxt, int disable)
+{
+	return set_flag(cxt, MNT_FL_NOSWAPMATCH, disable);
+}
+
+/**
+ * mnt_context_is_swapmatch:
+ * @cxt: mount context
+ *
+ * Returns: 1 if swap between source and target is allowed (default is 1) or 0.
+ */
+int mnt_context_is_swapmatch(struct libmnt_context *cxt)
+{
+	return cxt && (cxt->flags & MNT_FL_NOSWAPMATCH) ? 0 : 1;
 }
 
 /**
@@ -1617,7 +1643,7 @@ static int apply_table(struct libmnt_context *cxt, struct libmnt_table *tb,
 		else if (tgt)
 			fs = mnt_table_find_target(tb, tgt, direction);
 
-		if (!fs) {
+		if (!fs && mnt_context_is_swapmatch(cxt)) {
 			/* swap source and target (if @src is not LABEL/UUID),
 			 * for example in
 			 *
@@ -1687,7 +1713,7 @@ int mnt_context_apply_fstab(struct libmnt_context *cxt)
 	if (!cxt)
 		return -EINVAL;
 
-	if (mnt_context_fstab_applied(cxt))
+	if (mnt_context_tab_applied(cxt))	/* already applied */
 		return 0;
 
 	if (mnt_context_is_restricted(cxt)) {
@@ -1757,12 +1783,12 @@ int mnt_context_apply_fstab(struct libmnt_context *cxt)
 }
 
 /**
- * mnt_context_fstab_applied:
+ * mnt_context_tab_applied:
  * @cxt: mount context
  *
  * Returns: 1 if fstab (or mtab) has been applied to the context, or 0.
  */
-int mnt_context_fstab_applied(struct libmnt_context *cxt)
+int mnt_context_tab_applied(struct libmnt_context *cxt)
 {
 	return cxt && (cxt->flags & MNT_FL_TAB_APPLIED);
 }
@@ -1936,6 +1962,8 @@ int mnt_context_helper_setopt(struct libmnt_context *cxt, int c, char *arg)
  * @cxt: context
  * @fs: filesystem
  * @mounted: returns 1 for mounted and 0 for non-mounted filesystems
+ *
+ * Please, read mnt_table_is_fs_mounted() description!
  *
  * Returns: 0 on success and negative number in case of error.
  */

@@ -8,12 +8,12 @@
  *	the terms of the GNU Public License.
  */
 
-typedef struct {
+struct aix_partition {
 	unsigned int   magic;        /* expect AIX_LABEL_MAGIC */
 	unsigned int   fillbytes1[124];
 	unsigned int   physical_volume_id;
 	unsigned int   fillbytes2[124];
-} aix_partition;
+};
 
 #define	AIX_LABEL_MAGIC		0xc9c2d4c1
 #define	AIX_LABEL_MAGIC_SWAPPED	0xc1d4c2c9
@@ -22,6 +22,4 @@ typedef struct {
 
 /* fdiskaixlabel.c */
 extern struct	systypes aix_sys_types[];
-extern int	check_aix_label(struct fdisk_context *cxt);
-
 #endif /* FDISK_AIX_LABEL_H */

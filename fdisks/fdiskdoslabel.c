@@ -22,7 +22,7 @@
 		s |= (sector >> 2) & 0xc0;				\
 	}
 
-#define alignment_required	(grain != cxt->sector_size)
+#define alignment_required	(cxt->grain != cxt->sector_size)
 
 struct pte ptes[MAXIMUM_PARTS];
 sector_t extended_offset;
@@ -70,12 +70,23 @@ static void read_pte(struct fdisk_context *cxt, int pno, sector_t offset)
 	pe->part_table = pe->ext_pointer = NULL;
 }
 
-static void dos_write_mbr_id(unsigned char *b, unsigned int id)
+static void mbr_set_id(unsigned char *b, unsigned int id)
 {
 	store4_little_endian(&b[440], id);
 }
 
-static unsigned int dos_read_mbr_id(const unsigned char *b)
+static void mbr_set_magic(unsigned char *b)
+{
+	b[510] = 0x55;
+	b[511] = 0xaa;
+}
+
+int mbr_is_valid_magic(unsigned char *b)
+{
+	return (b[510] == 0x55 && b[511] == 0xaa);
+}
+
+static unsigned int mbr_get_id(const unsigned char *b)
 {
 	return read4_little_endian(&b[440]);
 }
@@ -108,16 +119,73 @@ void dos_init(struct fdisk_context *cxt)
 	for (i = 0; i < 4; i++) {
 		struct pte *pe = &ptes[i];
 
-		pe->part_table = pt_offset(cxt->mbr, i);
+		pe->part_table = pt_offset(cxt->firstsector, i);
 		pe->ext_pointer = NULL;
 		pe->offset = 0;
-		pe->sectorbuffer = cxt->mbr;
+		pe->sectorbuffer = cxt->firstsector;
 		pe->changed = 0;
 	}
 
 	warn_geometry(cxt);
 	warn_limits(cxt);
 	warn_alignment(cxt);
+}
+
+static void dos_delete_partition(
+		struct fdisk_context *cxt __attribute__ ((__unused__)),
+		int partnum)
+{
+	struct pte *pe = &ptes[partnum];
+	struct partition *p = pe->part_table;
+	struct partition *q = pe->ext_pointer;
+
+	/* Note that for the fifth partition (partnum == 4) we don't actually
+	   decrement partitions. */
+
+	if (partnum < 4) {
+		if (IS_EXTENDED (p->sys_ind) && partnum == ext_index) {
+			partitions = 4;
+			ptes[ext_index].ext_pointer = NULL;
+			extended_offset = 0;
+		}
+		clear_partition(p);
+	} else if (!q->sys_ind && partnum > 4) {
+		/* the last one in the chain - just delete */
+		--partitions;
+		--partnum;
+		clear_partition(ptes[partnum].ext_pointer);
+		ptes[partnum].changed = 1;
+	} else {
+		/* not the last one - further ones will be moved down */
+		if (partnum > 4) {
+			/* delete this link in the chain */
+			p = ptes[partnum-1].ext_pointer;
+			*p = *q;
+			set_start_sect(p, get_start_sect(q));
+			set_nr_sects(p, get_nr_sects(q));
+			ptes[partnum-1].changed = 1;
+		} else if (partitions > 5) {    /* 5 will be moved to 4 */
+			/* the first logical in a longer chain */
+			struct pte *pe = &ptes[5];
+
+			if (pe->part_table) /* prevent SEGFAULT */
+				set_start_sect(pe->part_table,
+					       get_partition_start(pe) -
+					       extended_offset);
+			pe->offset = extended_offset;
+			pe->changed = 1;
+		}
+
+		if (partitions > 5) {
+			partitions--;
+			while (partnum < partitions) {
+				ptes[partnum] = ptes[partnum+1];
+				partnum++;
+			}
+		} else
+			/* the only logical: clear only */
+			clear_partition(ptes[partnum].part_table);
+	}
 }
 
 static void read_extended(struct fdisk_context *cxt, int ext)
@@ -208,7 +276,7 @@ static void read_extended(struct fdisk_context *cxt, int ext)
 		if (!get_nr_sects(pe->part_table) &&
 		    (partitions > 5 || ptes[4].part_table->sys_ind)) {
 			printf(_("omitting empty partition (%d)\n"), i+1);
-			dos_delete_partition(i);
+			dos_delete_partition(cxt, i);
 			goto remove; 	/* numbering changed */
 		}
 	}
@@ -216,10 +284,10 @@ static void read_extended(struct fdisk_context *cxt, int ext)
 
 void dos_print_mbr_id(struct fdisk_context *cxt)
 {
-	printf(_("Disk identifier: 0x%08x\n"), dos_read_mbr_id(cxt->mbr));
+	printf(_("Disk identifier: 0x%08x\n"), mbr_get_id(cxt->firstsector));
 }
 
-void create_doslabel(struct fdisk_context *cxt)
+static int dos_create_disklabel(struct fdisk_context *cxt)
 {
 	unsigned int id;
 
@@ -229,15 +297,16 @@ void create_doslabel(struct fdisk_context *cxt)
 	fprintf(stderr, _("Building a new DOS disklabel with disk identifier 0x%08x.\n"), id);
 
 	dos_init(cxt);
-	fdisk_mbr_zeroize(cxt);
+	fdisk_zeroize_firstsector(cxt);
 	set_all_unchanged();
 	set_changed(0);
 
 	/* Generate an MBR ID for this disk */
-	dos_write_mbr_id(cxt->mbr, id);
+	mbr_set_id(cxt->firstsector, id);
 
 	/* Put MBR signature */
-	write_part_table_flag(cxt->mbr);
+	mbr_set_magic(cxt->firstsector);
+	return 0;
 }
 
 void dos_set_mbr_id(struct fdisk_context *cxt)
@@ -247,7 +316,7 @@ void dos_set_mbr_id(struct fdisk_context *cxt)
 	char ps[64];
 
 	snprintf(ps, sizeof ps, _("New disk identifier (current 0x%08x): "),
-		 dos_read_mbr_id(cxt->mbr));
+		 mbr_get_id(cxt->firstsector));
 
 	if (read_chars(ps) == '\n')
 		return;
@@ -256,74 +325,57 @@ void dos_set_mbr_id(struct fdisk_context *cxt)
 	if (*ep != '\n')
 		return;
 
-	dos_write_mbr_id(cxt->mbr, new_id);
+	mbr_set_id(cxt->firstsector, new_id);
 	MBRbuffer_changed = 1;
 	dos_print_mbr_id(cxt);
 }
 
-void dos_delete_partition(int i)
+static void get_partition_table_geometry(struct fdisk_context *cxt,
+			unsigned int *ph, unsigned int *ps)
 {
-	struct pte *pe = &ptes[i];
-	struct partition *p = pe->part_table;
-	struct partition *q = pe->ext_pointer;
+	unsigned char *bufp = cxt->firstsector;
+	struct partition *p;
+	int i, h, s, hh, ss;
+	int first = 1;
+	int bad = 0;
 
-	/* Note that for the fifth partition (i == 4) we don't actually
-	   decrement partitions. */
-
-	if (i < 4) {
-		if (IS_EXTENDED (p->sys_ind) && i == ext_index) {
-			partitions = 4;
-			ptes[ext_index].ext_pointer = NULL;
-			extended_offset = 0;
+	hh = ss = 0;
+	for (i=0; i<4; i++) {
+		p = pt_offset(bufp, i);
+		if (p->sys_ind != 0) {
+			h = p->end_head + 1;
+			s = (p->end_sector & 077);
+			if (first) {
+				hh = h;
+				ss = s;
+				first = 0;
+			} else if (hh != h || ss != s)
+				bad = 1;
 		}
-		clear_partition(p);
-	} else if (!q->sys_ind && i > 4) {
-		/* the last one in the chain - just delete */
-		--partitions;
-		--i;
-		clear_partition(ptes[i].ext_pointer);
-		ptes[i].changed = 1;
-	} else {
-		/* not the last one - further ones will be moved down */
-		if (i > 4) {
-			/* delete this link in the chain */
-			p = ptes[i-1].ext_pointer;
-			*p = *q;
-			set_start_sect(p, get_start_sect(q));
-			set_nr_sects(p, get_nr_sects(q));
-			ptes[i-1].changed = 1;
-		} else if (partitions > 5) {    /* 5 will be moved to 4 */
-			/* the first logical in a longer chain */
-			struct pte *pe = &ptes[5];
+	}
 
-			if (pe->part_table) /* prevent SEGFAULT */
-				set_start_sect(pe->part_table,
-					       get_partition_start(pe) -
-					       extended_offset);
-			pe->offset = extended_offset;
-			pe->changed = 1;
-		}
-
-		if (partitions > 5) {
-			partitions--;
-			while (i < partitions) {
-				ptes[i] = ptes[i+1];
-				i++;
-			}
-		} else
-			/* the only logical: clear only */
-			clear_partition(ptes[i].part_table);
+	if (!first && !bad) {
+		*ph = hh;
+		*ps = ss;
 	}
 }
 
-int check_dos_label(struct fdisk_context *cxt)
+
+static int dos_probe_label(struct fdisk_context *cxt)
 {
 	int i;
+	unsigned int h = 0, s = 0;
 
-	if (!valid_part_table_flag(cxt->mbr))
+	if (!mbr_is_valid_magic(cxt->firstsector))
 		return 0;
 
 	dos_init(cxt);
+
+	get_partition_table_geometry(cxt, &h, &s);
+	if (h && s) {
+		cxt->geom.heads = h;
+	        cxt->geom.sectors = s;
+	}
 
 	for (i = 0; i < 4; i++) {
 		struct pte *pe = &ptes[i];
@@ -340,7 +392,7 @@ int check_dos_label(struct fdisk_context *cxt)
 	for (i = 3; i < partitions; i++) {
 		struct pte *pe = &ptes[i];
 
-		if (!valid_part_table_flag(pe->sectorbuffer)) {
+		if (!mbr_is_valid_magic(pe->sectorbuffer)) {
 			fprintf(stderr,
 				_("Warning: invalid flag 0x%04x of partition "
 				"table %d will be corrected by w(rite)\n"),
@@ -431,7 +483,7 @@ static sector_t align_lba_in_range(struct fdisk_context *cxt,
 	return lba;
 }
 
-void dos_add_partition(struct fdisk_context *cxt, int n, int sys)
+static void add_partition(struct fdisk_context *cxt, int n, int sys)
 {
 	char mesg[256];		/* 48 does not suffice in Japanese */
 	int i, read = 0;
@@ -590,16 +642,88 @@ static void add_logical(struct fdisk_context *cxt)
 		partitions++;
 	}
 	printf(_("Adding logical partition %d\n"), partitions);
-	dos_add_partition(cxt, partitions - 1, LINUX_NATIVE);
+	add_partition(cxt, partitions - 1, LINUX_NATIVE);
+}
+
+static int dos_verify_disklabel(struct fdisk_context *cxt)
+{
+	int i, j;
+	sector_t total = 1, n_sectors = cxt->total_sectors;
+	unsigned long long first[partitions], last[partitions];
+	struct partition *p;
+
+	fill_bounds(first, last);
+	for (i = 0; i < partitions; i++) {
+		struct pte *pe = &ptes[i];
+
+		p = pe->part_table;
+		if (p->sys_ind && !IS_EXTENDED (p->sys_ind)) {
+			check_consistency(cxt, p, i);
+			check_alignment(cxt, get_partition_start(pe), i);
+			if (get_partition_start(pe) < first[i])
+				printf(_("Warning: bad start-of-data in "
+					 "partition %d\n"), i + 1);
+			check(cxt, i + 1, p->end_head, p->end_sector, p->end_cyl,
+			      last[i]);
+			total += last[i] + 1 - first[i];
+			for (j = 0; j < i; j++)
+				if ((first[i] >= first[j] && first[i] <= last[j])
+				    || ((last[i] <= last[j] && last[i] >= first[j]))) {
+					printf(_("Warning: partition %d overlaps "
+						 "partition %d.\n"), j + 1, i + 1);
+					total += first[i] >= first[j] ?
+						first[i] : first[j];
+					total -= last[i] <= last[j] ?
+						last[i] : last[j];
+				}
+		}
+	}
+
+	if (extended_offset) {
+		struct pte *pex = &ptes[ext_index];
+		sector_t e_last = get_start_sect(pex->part_table) +
+			get_nr_sects(pex->part_table) - 1;
+
+		for (i = 4; i < partitions; i++) {
+			total++;
+			p = ptes[i].part_table;
+			if (!p->sys_ind) {
+				if (i != 4 || i + 1 < partitions)
+					printf(_("Warning: partition %d "
+						 "is empty\n"), i + 1);
+			}
+			else if (first[i] < extended_offset ||
+					last[i] > e_last)
+				printf(_("Logical partition %d not entirely in "
+					"partition %d\n"), i + 1, ext_index + 1);
+		}
+	}
+
+	if (total > n_sectors)
+		printf(_("Total allocated sectors %llu greater than the maximum"
+			 " %llu\n"), total, n_sectors);
+	else if (total < n_sectors)
+		printf(_("Remaining %lld unallocated %ld-byte sectors\n"),
+		       n_sectors - total, cxt->sector_size);
+
+	return 0;
 }
 
 /*
  * Ask the user for new partition type information (logical, extended).
- * This function calls the actual partition adding logic - dos_add_partition.
+ * This function calls the actual partition adding logic - add_partition.
+ *
+ * API callback.
  */
-void dos_new_partition(struct fdisk_context *cxt)
+static void dos_add_partition(
+			struct fdisk_context *cxt,
+			int partnum __attribute__ ((__unused__)),
+			int parttype)
 {
 	int i, free_primary = 0;
+
+	/* default */
+	parttype = LINUX_NATIVE;
 
 	for (i = 0; i < 4; i++)
 		free_primary += !ptes[i].part_table->sys_ind;
@@ -619,7 +743,7 @@ void dos_new_partition(struct fdisk_context *cxt)
 	} else if (partitions >= MAXIMUM_PARTS) {
 		printf(_("All logical partitions are in use\n"));
 		printf(_("Adding a primary partition\n"));
-		dos_add_partition(cxt, get_partition(cxt, 0, 4), LINUX_NATIVE);
+		add_partition(cxt, get_partition(cxt, 0, 4), parttype);
 	} else {
 		char c, dflt, line[LINE_LENGTH];
 
@@ -641,7 +765,7 @@ void dos_new_partition(struct fdisk_context *cxt)
 		if (c == 'p') {
 			int i = get_nonexisting_partition(cxt, 0, 4);
 			if (i >= 0)
-				dos_add_partition(cxt, i, LINUX_NATIVE);
+				add_partition(cxt, i, parttype);
 			return;
 		} else if (c == 'l' && extended_offset) {
 			add_logical(cxt);
@@ -649,16 +773,25 @@ void dos_new_partition(struct fdisk_context *cxt)
 		} else if (c == 'e' && !extended_offset) {
 			int i = get_nonexisting_partition(cxt, 0, 4);
 			if (i >= 0)
-				dos_add_partition(cxt, i, EXTENDED);
+				add_partition(cxt, i, EXTENDED);
 			return;
 		} else
 			printf(_("Invalid partition type `%c'\n"), c);
 	}
 }
 
-void dos_write_table(struct fdisk_context *cxt)
+static int write_sector(struct fdisk_context *cxt, sector_t secno,
+			       unsigned char *buf)
 {
-	int i;
+	seek_sector(cxt, secno);
+	if (write(cxt->dev_fd, buf, cxt->sector_size) != (ssize_t) cxt->sector_size)
+		return -errno;
+	return 0;
+}
+
+static int dos_write_disklabel(struct fdisk_context *cxt)
+{
+	int i, rc = 0;
 
 	/* MBR (primary partitions) */
 	if (!MBRbuffer_changed) {
@@ -667,16 +800,34 @@ void dos_write_table(struct fdisk_context *cxt)
 				MBRbuffer_changed = 1;
 	}
 	if (MBRbuffer_changed) {
-		write_part_table_flag(cxt->mbr);
-		write_sector(cxt, 0, cxt->mbr);
+		mbr_set_magic(cxt->firstsector);
+		rc = write_sector(cxt, 0, cxt->firstsector);
+		if (rc)
+			goto done;
 	}
 	/* EBR (logical partitions) */
 	for (i = 4; i < partitions; i++) {
 		struct pte *pe = &ptes[i];
 
 		if (pe->changed) {
-			write_part_table_flag(pe->sectorbuffer);
-			write_sector(cxt, pe->offset, pe->sectorbuffer);
+			mbr_set_magic(pe->sectorbuffer);
+			rc = write_sector(cxt, pe->offset, pe->sectorbuffer);
+			if (rc)
+				goto done;
 		}
 	}
+
+done:
+	return rc;
 }
+
+const struct fdisk_label dos_label =
+{
+	.name = "dos",
+	.probe = dos_probe_label,
+	.write = dos_write_disklabel,
+	.verify = dos_verify_disklabel,
+	.create = dos_create_disklabel,
+	.part_add = dos_add_partition,
+	.part_delete = dos_delete_partition,
+};

@@ -78,7 +78,7 @@ static void init(void)
 	partitions = SUN_NUM_PARTITIONS;
 }
 
-int check_sun_label(struct fdisk_context *cxt)
+static int sun_probe_label(struct fdisk_context *cxt)
 {
 	unsigned short *ush;
 	int csum;
@@ -144,7 +144,7 @@ int check_sun_label(struct fdisk_context *cxt)
 	return 1;
 }
 
-void create_sunlabel(struct fdisk_context *cxt)
+static int sun_create_disklabel(struct fdisk_context *cxt)
 {
 	struct hd_geometry geometry;
 	sector_t llsectors, llcyls;
@@ -160,7 +160,7 @@ void create_sunlabel(struct fdisk_context *cxt)
 #endif
 
 	init();
-	fdisk_mbr_zeroize(cxt);
+	fdisk_zeroize_firstsector(cxt);
 
 	sunlabel->magic = SSWAP16(SUN_LABEL_MAGIC);
 	sunlabel->sanity = SSWAP32(SUN_LABEL_SANE);
@@ -234,6 +234,8 @@ void create_sunlabel(struct fdisk_context *cxt)
 
 	set_all_unchanged();
 	set_changed(0);
+
+	return 0;
 }
 
 void toggle_sunflags(struct fdisk_context *cxt, int i, uint16_t mask)
@@ -293,7 +295,7 @@ static int verify_sun_cmp(int *a, int *b)
     return -1;
 }
 
-void verify_sun(struct fdisk_context *cxt)
+static int sun_verify_disklabel(struct fdisk_context *cxt)
 {
     uint32_t starts[SUN_NUM_PARTITIONS], lens[SUN_NUM_PARTITIONS], start, stop;
     uint32_t i,j,k,starto,endo;
@@ -345,7 +347,7 @@ void verify_sun(struct fdisk_context *cxt)
 
     if (array[0] == -1) {
 	printf(_("No partitions defined\n"));
-	return;
+	return 0;
     }
     stop = cxt->geom.cylinders * cxt->geom.heads * cxt->geom.sectors;
     if (starts[array[0]])
@@ -358,9 +360,11 @@ void verify_sun(struct fdisk_context *cxt)
     start = (starts[array[i]] + lens[array[i]]);
     if (start < stop)
         printf(_("Unused gap - sectors %d-%d\n"), start, stop);
+    
+    return 0;
 }
 
-void add_sun_partition(struct fdisk_context *cxt, int n, int sys)
+static void sun_add_partition(struct fdisk_context *cxt, int n, int sys)
 {
 	uint32_t starts[SUN_NUM_PARTITIONS], lens[SUN_NUM_PARTITIONS];
 	struct sun_partition *part = &sunlabel->partitions[n];
@@ -481,13 +485,13 @@ and is of type `Whole disk'\n"));
 	set_sun_partition(cxt, n, first, last, sys);
 }
 
-void sun_delete_partition(struct fdisk_context *cxt, int i)
+static void sun_delete_partition(struct fdisk_context *cxt, int partnum)
 {
-	struct sun_partition *part = &sunlabel->partitions[i];
-	struct sun_tag_flag *tag = &sunlabel->part_tags[i];
+	struct sun_partition *part = &sunlabel->partitions[partnum];
+	struct sun_tag_flag *tag = &sunlabel->part_tags[partnum];
 	unsigned int nsec;
 
-	if (i == 2 &&
+	if (partnum == 2 &&
 	    tag->tag == SSWAP16(SUN_TAG_BACKUP) &&
 	    !part->start_cylinder &&
 	    (nsec = SSWAP32(part->num_sectors))
@@ -624,7 +628,7 @@ void sun_set_pcylcount(struct fdisk_context *cxt)
 				 _("Number of physical cylinders")));
 }
 
-void sun_write_table(struct fdisk_context *cxt)
+static int sun_write_disklabel(struct fdisk_context *cxt)
 {
 	unsigned short *ush = (unsigned short *)sunlabel;
 	unsigned short csum = 0;
@@ -633,12 +637,25 @@ void sun_write_table(struct fdisk_context *cxt)
 		csum ^= *ush++;
 	sunlabel->cksum = csum;
 	if (lseek(cxt->dev_fd, 0, SEEK_SET) < 0)
-		fatal(cxt, unable_to_seek);
+		return -errno;
 	if (write(cxt->dev_fd, sunlabel, SECTOR_SIZE) != SECTOR_SIZE)
-		fatal(cxt, unable_to_write);
+		return -errno;
+
+	return 0;
 }
 
 int sun_get_sysid(struct fdisk_context *cxt, int i)
 {
 	return SSWAP16(sunlabel->part_tags[i].tag);
 }
+
+const struct fdisk_label sun_label =
+{
+	.name = "sun",
+	.probe = sun_probe_label,
+	.write = sun_write_disklabel,
+	.verify = sun_verify_disklabel,
+	.create = sun_create_disklabel,
+	.part_add = sun_add_partition,
+	.part_delete = sun_delete_partition,
+};

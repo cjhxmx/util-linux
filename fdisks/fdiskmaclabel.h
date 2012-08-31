@@ -8,12 +8,12 @@
  *	the terms of the GNU Public License.
  */
 
-typedef struct {
+struct mac_partition {
 	unsigned int  magic;        /* expect MAC_LABEL_MAGIC */
 	unsigned int  fillbytes1[124];
 	unsigned int  physical_volume_id;
 	unsigned int  fillbytes2[124];
-} mac_partition;
+};
 
 /* MAC magic number only 16bits, do I always know that there are 0200
  * following? Problem, after magic the uint16_t res1; follows, I donnno know
@@ -27,12 +27,8 @@ typedef struct {
 #define	MAC_LABEL_MAGIC_2_SWAPPED	0x00003505
 #define	MAC_LABEL_MAGIC_3_SWAPPED	0x0000d405
 
-/* fdisk.c */
-#define maclabel ((mac_partition *)cxt->mbr)
-
 /* fdiskmaclabel.c */
 extern struct	systypes mac_sys_types[];
 extern void	mac_nolabel(struct fdisk_context *cxt);
-extern int	check_mac_label(struct fdisk_context *cxt);
 
 #endif /* FDISK_MAC_LABEL_H */

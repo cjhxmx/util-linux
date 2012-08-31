@@ -37,6 +37,7 @@
 #define FDISK_DEBUG_CONTEXT	(1 << 2)
 #define FDISK_DEBUG_TOPOLOGY    (1 << 3)
 #define FDISK_DEBUG_GEOMETRY    (1 << 4)
+#define FDISK_DEBUG_LABEL       (1 << 5)
 #define FDISK_DEBUG_ALL		0xFFFF
 
 # define ON_DBG(m, x)	do { \
@@ -110,7 +111,7 @@ struct fdisk_geometry {
 struct fdisk_context {
 	int dev_fd;         /* device descriptor */
 	char *dev_path;     /* device path */
-	unsigned char *mbr; /* buffer with master boot record */
+	unsigned char *firstsector; /* buffer with master boot record */
 
 	/* topology */
 	unsigned long io_size;		/* I/O size used by fdisk */
@@ -120,22 +121,71 @@ struct fdisk_context {
 	unsigned long sector_size;	/* logical size */
 	unsigned long alignment_offset;
 
+	unsigned long grain;		/* alignment unit */
+
 	/* geometry */
 	sector_t total_sectors; /* in logical sectors */
 	struct fdisk_geometry geom;
+
+	/* label operations and description */
+	const struct fdisk_label *label;
 };
+
+/*
+ * Label specific operations
+ */
+struct fdisk_label {
+	const char *name;
+
+	/* probe disk label */
+	int (*probe)(struct fdisk_context *cxt);
+	/* write in-memory changes to disk */
+	int (*write)(struct fdisk_context *cxt);
+	/* verify the partition table */
+	int (*verify)(struct fdisk_context *cxt);
+	/* create new disk label */
+	int (*create)(struct fdisk_context *cxt);
+	/* new partition */
+	void (*part_add)(struct fdisk_context *cxt, int partnum, int parttype);
+	/* delete partition */
+	void (*part_delete)(struct fdisk_context *cxt, int partnum);
+};
+
+/*
+ * labels
+ */
+extern const struct fdisk_label aix_label;
+extern const struct fdisk_label dos_label;
+extern const struct fdisk_label bsd_label;
+extern const struct fdisk_label mac_label;
+extern const struct fdisk_label sun_label;
+extern const struct fdisk_label sgi_label;
 
 extern struct fdisk_context *fdisk_new_context_from_filename(const char *fname, int readonly);
 extern int fdisk_dev_has_topology(struct fdisk_context *cxt);
+extern int fdisk_dev_has_disklabel(struct fdisk_context *cxt);
 extern int fdisk_dev_sectsz_is_default(struct fdisk_context *cxt);
 extern void fdisk_free_context(struct fdisk_context *cxt);
-extern void fdisk_mbr_zeroize(struct fdisk_context *cxt);
-extern void fdisk_geom_set_cyls(struct fdisk_context *cxt);
+extern void fdisk_zeroize_firstsector(struct fdisk_context *cxt);
+extern int fdisk_context_force_sector_size(struct fdisk_context *cxt, sector_t s);
+extern int fdisk_context_set_user_geometry(struct fdisk_context *cxt,
+			    unsigned int cylinders, unsigned int heads,
+			    unsigned int sectors);
+extern int fdisk_delete_partition(struct fdisk_context *cxt, int partnum);
+extern int fdisk_add_partition(struct fdisk_context *cxt, int partnum, int parttype);
+extern int fdisk_write_disklabel(struct fdisk_context *cxt);
+extern int fdisk_verify_disklabel(struct fdisk_context *cxt);
+extern int fdisk_create_disklabel(struct fdisk_context *cxt, const char *name);
 
 /* prototypes for fdisk.c */
-extern char *disk_device, *line_ptr;
-extern int fd, partitions;
+extern char *line_ptr;
+extern int partitions;
 extern unsigned int display_in_cyl_units, units_per_sector;
+
+extern void check_consistency(struct fdisk_context *cxt, struct partition *p, int partition);
+extern void check_alignment(struct fdisk_context *cxt, sector_t lba, int partition);
+extern void check(struct fdisk_context *cxt, int n, unsigned int h, unsigned int s, unsigned int c, unsigned int start);
+
 extern void change_units(struct fdisk_context *cxt);
 extern void fatal(struct fdisk_context *cxt, enum failure why);
 extern int  get_partition(struct fdisk_context *cxt, int warn, int max);
@@ -145,7 +195,6 @@ extern char read_char(char *mesg);
 extern int read_hex(struct systypes *sys);
 extern void reread_partition_table(struct fdisk_context *cxt, int leave);
 extern struct partition *get_part_table(int);
-extern int valid_part_table_flag(unsigned char *b);
 extern unsigned int read_int(struct fdisk_context *cxt,
 			     unsigned int low, unsigned int dflt,
 			     unsigned int high, unsigned int base, char *mesg);
@@ -153,8 +202,7 @@ extern void print_menu(enum menutype);
 extern void print_partition_size(struct fdisk_context *cxt, int num, sector_t start, sector_t stop, int sysid);
 
 extern void fill_bounds(sector_t *first, sector_t *last);
-extern unsigned int heads, cylinders;
-extern sector_t sectors;
+
 extern char *partition_type(unsigned char type);
 extern void update_units(struct fdisk_context *cxt);
 extern char read_chars(char *mesg);
@@ -169,8 +217,6 @@ extern unsigned int read_int_with_suffix(struct fdisk_context *cxt,
 extern sector_t align_lba(struct fdisk_context *cxt, sector_t lba, int direction);
 extern int get_partition_dflt(struct fdisk_context *cxt, int warn, int max, int dflt);
 extern void update_sector_offset(struct fdisk_context *cxt);
-extern void get_partition_table_geometry(struct fdisk_context *cxt,
-					 unsigned int *ph, unsigned int *ps);
 
 #define PLURAL	0
 #define SINGULAR 1
@@ -178,7 +224,10 @@ extern const char * str_units(int);
 
 extern sector_t get_nr_sects(struct partition *p);
 
-enum labeltype {
+/*
+ * Supported partition table types (labels)
+ */
+enum fdisk_labeltype {
 	DOS_LABEL = 1,
 	SUN_LABEL = 2,
 	SGI_LABEL = 4,
@@ -188,9 +237,8 @@ enum labeltype {
 	ANY_LABEL = -1
 };
 
-extern enum labeltype disklabel;
+extern enum fdisk_labeltype disklabel;
 extern int MBRbuffer_changed;
-extern unsigned long grain;
 
 /* start_sect and nr_sects are stored little endian on all machines */
 /* moreover, they are not aligned correctly */
@@ -231,13 +279,6 @@ static inline void read_sector(struct fdisk_context *cxt, sector_t secno, unsign
 	seek_sector(cxt, secno);
 	if (read(cxt->dev_fd, buf, cxt->sector_size) != (ssize_t) cxt->sector_size)
 		fatal(cxt, unable_to_read);
-}
-
-static inline void write_sector(struct fdisk_context *cxt, sector_t secno, unsigned char *buf)
-{
-	seek_sector(cxt, secno);
-	if (write(cxt->dev_fd, buf, cxt->sector_size) != (ssize_t) cxt->sector_size)
-		fatal(cxt, unable_to_write);
 }
 
 static inline sector_t get_start_sect(struct partition *p)

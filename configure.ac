@@ -22,7 +22,7 @@ PACKAGE_VERSION_RELEASE=0
 
 dnl libblkid version
 LIBBLKID_VERSION="$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR.$PACKAGE_VERSION_RELEASE"
-LIBBLKID_DATE="24-Feb-2012"
+LIBBLKID_DATE="15-Aug-2012"
 LIBBLKID_LT_MAJOR=1
 LIBBLKID_LT_MINOR=1
 LIBBLKID_LT_MICRO=0
@@ -89,6 +89,7 @@ AC_SUBST([usrsbin_execdir])
 usrlib_execdir='${exec_prefix}/'$libdirname
 AC_SUBST([usrlib_execdir])
 
+
 AM_PROG_CC_C_O
 AC_PROG_CC_STDC
 AC_GNU_SOURCE
@@ -98,19 +99,23 @@ AC_C_VOLATILE
 AC_C_BIGENDIAN
 
 dnl Compiler warnings
+UL_WARN_ADD([-fno-common])
+UL_WARN_ADD([-Wall])
+UL_WARN_ADD([-Werror=sequence-point])
 UL_WARN_ADD([-Wextra])
+UL_WARN_ADD([-Wmissing-declarations])
+UL_WARN_ADD([-Wmissing-parameter-type])
+UL_WARN_ADD([-Wmissing-prototypes])
 UL_WARN_ADD([-Wno-missing-field-initializers])
+UL_WARN_ADD([-Wredundant-decls])
 UL_WARN_ADD([-Wsign-compare])
 UL_WARN_ADD([-Wtype-limits])
 UL_WARN_ADD([-Wuninitialized])
-UL_WARN_ADD([-Werror=sequence-point])
-UL_WARN_ADD([-Wunused-parameter])
-UL_WARN_ADD([-fno-common])
-UL_WARN_ADD([-Wmissing-parameter-type])
-UL_WARN_ADD([-Wunused-result])
 UL_WARN_ADD([-Wunused-but-set-parameter])
 UL_WARN_ADD([-Wunused-but-set-variable])
-UL_WARN_ADD([-Wredundant-decls])
+UL_WARN_ADD([-Wunused-parameter])
+UL_WARN_ADD([-Wunused-result])
+UL_WARN_ADD([-Wunused-variable])
 AC_SUBST([WARN_CFLAGS])
 
 dnl libtool-2
@@ -721,6 +726,7 @@ if test "x$build_libblkid" = xyes; then
   AC_DEFINE(HAVE_LIBBLKID, 1, [Define to 1 if you have the -lblkid.])
 fi
 AM_CONDITIONAL(BUILD_LIBBLKID, test "x$build_libblkid" = xyes)
+AM_CONDITIONAL(BUILD_LIBBLKID_TESTS, test "x$build_libblkid" = xyes -a "x$enable_static" = xyes)
 
 dnl
 dnl libmount
@@ -734,6 +740,7 @@ UL_REQUIRES_LINUX([libmount])
 UL_REQUIRES_BUILD([libmount], [libblkid])
 UL_REQUIRES_HAVE([libmount], [scanf_alloc_modifier], [scanf string alloc modifier])
 AM_CONDITIONAL(BUILD_LIBMOUNT, test "x$build_libmount" = xyes)
+AM_CONDITIONAL(BUILD_LIBMOUNT_TESTS, test "x$build_libmount" = xyes -a "x$enable_static" = xyes)
 
 AC_SUBST([LIBMOUNT_VERSION])
 AC_SUBST([LIBMOUNT_VERSION_INFO])
@@ -890,6 +897,7 @@ AC_ARG_ENABLE([eject],
 )
 UL_BUILD_INIT([eject])
 UL_REQUIRES_LINUX([eject])
+UL_REQUIRES_BUILD([eject], [libmount])
 AM_CONDITIONAL(BUILD_EJECT, test "x$build_eject" = xyes)
 
 
@@ -920,6 +928,7 @@ AM_CONDITIONAL(BUILD_HWCLOCK, test "x$build_hwclock" = xyes)
 UL_BUILD_INIT([swapon], [check])
 UL_REQUIRES_LINUX([swapon])
 UL_REQUIRES_BUILD([swapon], [libblkid])
+UL_REQUIRES_BUILD([swapon], [libmount])
 AM_CONDITIONAL(BUILD_SWAPON, test "x$build_swapon" = xyes)
 
 
@@ -1014,7 +1023,7 @@ AM_CONDITIONAL(BUILD_LAST, test "x$build_last" = xyes)
 
 
 AC_ARG_ENABLE([utmpdump],
-  AS_HELP_STRING([--disable-utmpdump], [build utmpdump]),
+  AS_HELP_STRING([--disable-utmpdump], [do not build utmpdump]),
   [], enable_utmpdump=yes
 )
 UL_BUILD_INIT([utmpdump])
@@ -1316,24 +1325,19 @@ LIBS=""
 
 AC_CONFIG_HEADERS(config.h)
 
-
+#
+# Don't use configure.ac to replace install paths! See Makefile PATHFILES for
+# more details.
+#
 AC_CONFIG_FILES([
 Makefile
-libblkid/blkid.pc
 libblkid/docs/Makefile
 libblkid/docs/version.xml
 libblkid/src/blkid.h
 libmount/docs/Makefile
 libmount/docs/version.xml
-libmount/mount.pc
 libmount/src/libmount.h
-libuuid/uuid.pc
-misc-utils/uuidd.8
-misc-utils/uuidd.rc
-misc-utils/uuidd.service
-misc-utils/uuidd.socket
 po/Makefile.in
-tests/commands.sh
 ])
 
 
