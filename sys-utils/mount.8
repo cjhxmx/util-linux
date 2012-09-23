@@ -559,11 +559,6 @@ Don't canonicalize paths. The mount command canonicalizes all paths
 file. This option can be used together with the
 .B \-f
 flag for already canonicalized absolut paths.
-.IP "\fB\-p, \-\-pass\-fd \fInum\fP"
-In case of a loop mount with encryption, read the passphrase from
-file descriptor
-.I num
-instead of from the terminal.
 .IP "\fB\-s\fP"
 Tolerate sloppy mount options rather than failing. This will ignore
 mount options not supported by a filesystem type. Not all filesystems
@@ -1464,11 +1459,11 @@ Enable POSIX Access Control Lists. See the
 .BR acl (5)
 manual page.
 .TP
-.BR usrjquot=aquota.user | grpjquota=aquota.group | jqfmt=vfsv0
+.BR usrjquota=aquota.user | grpjquota=aquota.group | jqfmt=vfsv0
 Apart from the old quota system (as in ext2, jqfmt=vfsold aka version 1 quota)
 ext3 also supports journaled quotas (version 2 quota). jqfmt=vfsv0
 enables journaled quotas. For journaled quotas the mount options
-usrjquot=aquota.user and grpjquota=aquota.group are required to tell the
+usrjquota=aquota.user and grpjquota=aquota.group are required to tell the
 quota system which quota database files to use. Journaled quotas have the
 advantage that even after a crash no quota check is required.
 
@@ -1481,7 +1476,7 @@ The options
 .B journal_dev, noload, data, commit, orlov, oldalloc, [no]user_xattr
 .B [no]acl, bsddf, minixdf, debug, errors, data_err, grpid, bsdgroups, nogrpid
 .B sysvgroups, resgid, resuid, sb, quota, noquota, grpquota, usrquota
-.B usrjquot, grpjquota and jqfmt
+.B usrjquota, grpjquota and jqfmt
 are backwardly compatible with ext3 or ext2.
 .TP
 .BR journal_checksum
@@ -2775,7 +2770,7 @@ not specified or the filesystem is known for libblkid, for example:
 .sp
 .RE
 This type of mount knows about four options, namely
-.BR loop ", " offset ", " sizelimit " and " encryption ,
+.BR loop ", " offset " and " sizelimit " ,
 that are really options to
 .BR \%losetup (8).
 (These options can be used in addition to those specific

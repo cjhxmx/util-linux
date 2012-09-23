@@ -3,6 +3,5 @@
 
 int main(int argv, char **argc)
 {
-	return su_main(argv, argc, SU_MODE);
+	return su_main(argv, argc, RUNUSER_MODE);
 }
-

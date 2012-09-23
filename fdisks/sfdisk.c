@@ -877,6 +877,7 @@ unitsize(int format) {
     case F_CYLINDER:
 	if (B.cylindersize)
 	    return B.cylindersize;
+	/* fallthrough */
     case F_SECTOR:
 	return 1;
     case F_BLOCK:
@@ -911,6 +912,7 @@ out_partition_header(char *dev, int format, struct geometry G) {
     default:
 	warnx(_("unimplemented format - using %s\n"),
 		G.cylindersize ? _("cylinders") : _("sectors"));
+	/* fallthrough */
     case F_CYLINDER:
 	if (G.cylindersize) {
 	    printf(_("Units: cylinders of %lu bytes, blocks of 1024 bytes"
@@ -1424,7 +1426,7 @@ extended_partition(char *dev, int fd, struct part_desc *ep, struct disk_desc *z)
 	cp = s->data + 0x1be;
 
 	if (pno + 4 >= ARRAY_SIZE(z->partitions)) {
-	    warnx(_("too many partitions - ignoring those past nr (%ld)\n"),
+	    warnx(_("too many partitions - ignoring those past nr (%zu)\n"),
 		    pno - 1);
 	    break;
 	}
@@ -1502,7 +1504,7 @@ bsd_partition(char *dev, int fd, struct part_desc *ep, struct disk_desc *z) {
     while (bp - bp0 < BSD_MAXPARTITIONS && bp - bp0 < l->d_npartitions) {
 	if (pno + 1 >= ARRAY_SIZE(z->partitions)) {
 	    warnx(_("too many partitions - ignoring those "
-		      "past nr (%ld)\n"), pno - 1);
+		      "past nr (%zu)\n"), pno - 1);
 	    break;
 	}
 	if (bp->p_fstype != BSD_FS_UNUSED) {

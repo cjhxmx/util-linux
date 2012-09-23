@@ -22,7 +22,7 @@ PACKAGE_VERSION_RELEASE=0
 
 dnl libblkid version
 LIBBLKID_VERSION="$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR.$PACKAGE_VERSION_RELEASE"
-LIBBLKID_DATE="15-Aug-2012"
+LIBBLKID_DATE="04-Sep-2012"
 LIBBLKID_LT_MAJOR=1
 LIBBLKID_LT_MINOR=1
 LIBBLKID_LT_MICRO=0
@@ -61,23 +61,13 @@ NONE:NONE | NONE:/usr | /usr:*)
 esac
 
 case $prefix:$localstatedir in
-  NONE:'${prefix}/var')
+  NONE:'${prefix}/var' | /usr:'${prefix}/var')
     localstatedir=/run
     AC_MSG_NOTICE([  --localstatedir defaults to /run])
-    ;;
-  *:'${prefix}/var')
-    localstatedir=${prefix}/run
-    ;;
-  NONE:*)
-    ;;
-  *:*)
-    localstatedir=${prefix}/${localstatedir}
     ;;
 esac
 AC_SUBST([localstatedir])
 
-libdirname=`basename "$libdir"`
-AC_SUBST([libdirname])
 
 # The original default values of {bin,sbin,lib}dir
 usrbin_execdir='${exec_prefix}/bin'
@@ -86,7 +76,12 @@ AC_SUBST([usrbin_execdir])
 usrsbin_execdir='${exec_prefix}/sbin'
 AC_SUBST([usrsbin_execdir])
 
-usrlib_execdir='${exec_prefix}/'$libdirname
+case $libdir in
+ '${exec_prefix}/'* | '${prefix}/'* | /usr/*)
+    usrlib_execdir=$libdir ;;
+ *)
+    usrlib_execdir='${exec_prefix}'$libdir ;;
+esac
 AC_SUBST([usrlib_execdir])
 
 
@@ -116,6 +111,10 @@ UL_WARN_ADD([-Wunused-but-set-variable])
 UL_WARN_ADD([-Wunused-parameter])
 UL_WARN_ADD([-Wunused-result])
 UL_WARN_ADD([-Wunused-variable])
+UL_WARN_ADD([-Wnested-externs])
+UL_WARN_ADD([-Wpointer-arith])
+UL_WARN_ADD([-Wstrict-prototypes])
+UL_WARN_ADD([-Wformat-security])
 AC_SUBST([WARN_CFLAGS])
 
 dnl libtool-2
@@ -951,7 +950,11 @@ UL_REQUIRES_HAVE([chcpu], [cpu_set_t], [cpu_set_t type])
 AM_CONDITIONAL(BUILD_CHCPU, test "x$build_chcpu" = xyes)
 
 
-UL_BUILD_INIT([wdctl], [check])
+AC_ARG_ENABLE([wdctl],
+  AS_HELP_STRING([--disable-wdctl], [do not build wdctl]),
+  [], enable_wdctl=check
+)
+UL_BUILD_INIT([wdctl])
 UL_REQUIRES_LINUX([wdctl])
 UL_REQUIRES_HAVE([wdctl], [linux_watchdog_h], [linux/watchdog.h header file])
 AM_CONDITIONAL(BUILD_WDCTL, test "x$build_wdctl" = xyes)
@@ -1150,6 +1153,15 @@ UL_REQUIRES_HAVE([su], [security_pam_misc_h], [PAM header file])
 AM_CONDITIONAL(BUILD_SU, test "x$build_su" = xyes)
 
 
+AC_ARG_ENABLE([runuser],
+  AS_HELP_STRING([--disable-runuser], [do not build runuser]),
+  [], enable_runuser=yes
+)
+UL_BUILD_INIT([runuser])
+UL_REQUIRES_HAVE([runuser], [security_pam_misc_h], [PAM header file])
+AM_CONDITIONAL(BUILD_RUNUSER, test "x$build_runuser" = xyes)
+
+
 AC_ARG_ENABLE([schedutils],
   AS_HELP_STRING([--disable-schedutils], [do not build chrt, ionice, teskset]),
   [], enable_schedutils=yes
@@ -1340,5 +1352,30 @@ libmount/src/libmount.h
 po/Makefile.in
 ])
 
-
 AC_OUTPUT
+
+AC_MSG_RESULT([
+	${PACKAGE}  ${VERSION}
+
+	prefix:            ${prefix}
+	exec prefix:       ${exec_prefix}
+
+        localstatedir:     ${localstatedir}
+	bindir:	           ${bindir}
+	sbindir:           ${sbindir}
+	libdir:            ${libdir}
+	includedir:        ${includedir}
+        usrbin_execdir:    ${usrbin_execdir}
+        usrsbin_execdir:   ${usrsbin_execdir}
+        usrlib_execdir:    ${usrlib_execdir}
+
+	compiler:          ${CC}
+	cflags:            ${CFLAGS}
+	suid cflags:       ${SUID_CFLAGS}
+	ldflags:           ${LDFLAGS}
+	suid ldflags:      ${SUID_LDFLAGS}
+
+	warnings:
+
+${WARN_CFLAGS}
+])

@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: util-linux 2.20-rc2\n"
 "Report-Msgid-Bugs-To: util-linux@vger.kernel.org\n"
-"POT-Creation-Date: 2012-08-15 17:10+0200\n"
+"POT-Creation-Date: 2012-09-04 13:54+0200\n"
 "PO-Revision-Date: 2011-08-29 00:19+0900\n"
 "Last-Translator: Takeshi Hamasaki <hmatrjp@users.sourceforge.jp>\n"
 "Language-Team: Japanese <translation-team-ja@lists.sourceforge.net>\n"
@@ -24,13 +24,13 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 
 #: disk-utils/addpart.c:14
-#, c-format
+#, fuzzy, c-format
 msgid " %s <disk device> <partition number> <start> <length>\n"
-msgstr ""
+msgstr "使い方: sfdisk --id デバイス パーティション番号 [ID]\n"
 
 #: disk-utils/addpart.c:52 disk-utils/blockdev.c:276 disk-utils/blockdev.c:420
 #: disk-utils/blockdev.c:445 disk-utils/delpart.c:53 disk-utils/fdformat.c:62
-#: disk-utils/fdformat.c:155 disk-utils/fsck.c:1347
+#: disk-utils/fdformat.c:155 disk-utils/fsck.c:1364
 #: disk-utils/fsck.cramfs.c:146 disk-utils/fsck.cramfs.c:498
 #: disk-utils/isosize.c:126 disk-utils/mkfs.bfs.c:184
 #: disk-utils/mkfs.cramfs.c:660 disk-utils/mkfs.cramfs.c:786
@@ -311,7 +311,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: disk-utils/fdformat.c:131 disk-utils/fsck.c:1490 disk-utils/mkfs.bfs.c:89
+#: disk-utils/fdformat.c:131 disk-utils/fsck.c:1507 disk-utils/mkfs.bfs.c:89
 #: disk-utils/mkfs.cramfs.c:763 fdisks/sfdisk.c:2633 include/c.h:248
 #: misc-utils/cal.c:353 misc-utils/getopt.c:431 misc-utils/kill.c:193
 #: misc-utils/logger.c:264 misc-utils/look.c:126 misc-utils/lsblk.c:1360
@@ -370,157 +370,157 @@ msgstr "両"
 msgid "Single"
 msgstr "片"
 
-#: disk-utils/fsck.c:187
+#: disk-utils/fsck.c:191
 #, fuzzy, c-format
 msgid "%s is mounted\n"
 msgstr "%s はマウントされています\t "
 
-#: disk-utils/fsck.c:189
+#: disk-utils/fsck.c:193
 #, fuzzy, c-format
 msgid "%s is not mounted\n"
-msgstr "%s: 見つかりません"
+msgstr "%s は書庫ではありません"
 
-#: disk-utils/fsck.c:303 lib/path.c:98 lib/path.c:119 lib/path.c:165
+#: disk-utils/fsck.c:307 lib/path.c:98 lib/path.c:119 lib/path.c:165
 #, fuzzy, c-format
 msgid "failed to read: %s"
 msgstr "ファイル '%2$s' からの %1$s の読み込みに失敗: %3$s"
 
-#: disk-utils/fsck.c:305 lib/path.c:121
+#: disk-utils/fsck.c:309 lib/path.c:121
 #, c-format
 msgid "parse error: %s"
 msgstr "解析エラー: %s"
 
-#: disk-utils/fsck.c:325
+#: disk-utils/fsck.c:329
 #, fuzzy, c-format
 msgid "Locking disk %s ... "
 msgstr "フロッピー・ディスク"
 
-#: disk-utils/fsck.c:335
+#: disk-utils/fsck.c:339
 #, fuzzy, c-format
 msgid "(waiting) "
 msgstr "待機中"
 
 #. TRANSLATORS: These are followups to "Locking disk...".
-#: disk-utils/fsck.c:345
+#: disk-utils/fsck.c:349
 #, fuzzy
 msgid "succeeded"
 msgstr "成功"
 
-#: disk-utils/fsck.c:345
+#: disk-utils/fsck.c:349
 #, fuzzy
 msgid "failed"
 msgstr "失敗"
 
-#: disk-utils/fsck.c:382
+#: disk-utils/fsck.c:386
 #, fuzzy, c-format
 msgid "failed to setup description for %s"
 msgstr "typescript ファイル %s の読み込みが失敗しました"
 
-#: disk-utils/fsck.c:408
+#: disk-utils/fsck.c:412
 #, fuzzy, c-format
 msgid "%s: parse error at line %d -- ignore"
 msgstr "%s: %s 内の %d 行でエラーです\n"
 
-#: disk-utils/fsck.c:437 disk-utils/fsck.c:439
+#: disk-utils/fsck.c:441 disk-utils/fsck.c:443
 #, fuzzy, c-format
 msgid "%s: failed to parse fstab"
-msgstr "\"%s\" のオープンに失敗しました: %s\n"
+msgstr "アドレス '%s' の解析に失敗\n"
 
-#: disk-utils/fsck.c:567 sys-utils/umount.c:217
+#: disk-utils/fsck.c:584 sys-utils/umount.c:217
 #, fuzzy, c-format
 msgid "%s: not found"
 msgstr "%s: 見つかりません"
 
-#: disk-utils/fsck.c:593 login-utils/login.c:1085 login-utils/vipw.c:212
+#: disk-utils/fsck.c:610 login-utils/login.c:1085 login-utils/vipw.c:212
 #: sys-utils/flock.c:314 sys-utils/swapon.c:267 term-utils/script.c:264
 #: term-utils/script.c:274
 msgid "fork failed"
 msgstr "子プロセスの起動に失敗"
 
-#: disk-utils/fsck.c:600
+#: disk-utils/fsck.c:617
 #, fuzzy, c-format
 msgid "%s: execute failed"
 msgstr "fork に失敗しました"
 
-#: disk-utils/fsck.c:688
+#: disk-utils/fsck.c:705
 #, fuzzy
 msgid "wait: no more child process?!?"
 msgstr "wait_for: プロセス %ld の記録がありません"
 
-#: disk-utils/fsck.c:691
+#: disk-utils/fsck.c:708
 #, fuzzy
 msgid "waidpid failed"
 msgstr "waitpid に失敗"
 
-#: disk-utils/fsck.c:709
+#: disk-utils/fsck.c:726
 #, c-format
 msgid "Warning... %s for device %s exited with signal %d."
 msgstr ""
 
-#: disk-utils/fsck.c:715
+#: disk-utils/fsck.c:732
 #, c-format
 msgid "%s %s: status is %x, should never happen."
 msgstr ""
 
-#: disk-utils/fsck.c:761
+#: disk-utils/fsck.c:778
 #, fuzzy, c-format
 msgid "Finished with %s (exit status %d)\n"
 msgstr "man コマンドが終了ステータス %d で失敗しました"
 
-#: disk-utils/fsck.c:823
+#: disk-utils/fsck.c:840
 #, fuzzy, c-format
 msgid "error %d while executing fsck.%s for %s"
 msgstr "\"%s\" を読み込もうとしてエラーが発生しました"
 
-#: disk-utils/fsck.c:892
+#: disk-utils/fsck.c:909
 msgid ""
 "Either all or none of the filesystem types passed to -t must be prefixed\n"
 "with 'no' or '!'."
 msgstr ""
 
-#: disk-utils/fsck.c:1009
+#: disk-utils/fsck.c:1026
 #, c-format
 msgid ""
 "%s: skipping bad line in /etc/fstab: bind mount with nonzero fsck pass number"
 msgstr ""
 
-#: disk-utils/fsck.c:1021
+#: disk-utils/fsck.c:1038
 #, c-format
 msgid "%s: skipping nonexistent device\n"
 msgstr "%s: 存在しないデバイスをスキップしています\n"
 
-#: disk-utils/fsck.c:1026
+#: disk-utils/fsck.c:1043
 #, c-format
 msgid ""
 "%s: nonexistent device (\"nofail\" fstab option may be used to skip this "
 "device)\n"
 msgstr ""
 
-#: disk-utils/fsck.c:1043
+#: disk-utils/fsck.c:1060
 #, fuzzy, c-format
 msgid "%s: skipping unknown filesystem type\n"
 msgstr "mount: 未知のファイルシステムタイプ '%s'"
 
-#: disk-utils/fsck.c:1062
+#: disk-utils/fsck.c:1079
 #, fuzzy, c-format
 msgid "cannot check %s: fsck.%s not found"
 msgstr "fsck: %sをチェックできません: fsck.%sは見つかりません\n"
 
-#: disk-utils/fsck.c:1151
+#: disk-utils/fsck.c:1168
 #, fuzzy
 msgid "failed to allocate iterator"
 msgstr "メモリの割り当てに失敗しました"
 
-#: disk-utils/fsck.c:1166
+#: disk-utils/fsck.c:1183
 msgid "Checking all file systems.\n"
 msgstr "すべてのファイルシステム検査します。\n"
 
-#: disk-utils/fsck.c:1257
+#: disk-utils/fsck.c:1274
 #, c-format
 msgid "--waiting-- (pass %d)\n"
 msgstr "--待機中-- (パス %d)\n"
 
-#: disk-utils/fsck.c:1281
+#: disk-utils/fsck.c:1298
 #, fuzzy, c-format
 msgid ""
 "\n"
@@ -530,7 +530,7 @@ msgstr ""
 "\n"
 "使い方: %s [オプション] パス名 [パス名 ...]\n"
 
-#: disk-utils/fsck.c:1285
+#: disk-utils/fsck.c:1302
 msgid ""
 "\n"
 "Options:\n"
@@ -552,32 +552,32 @@ msgid ""
 "See fsck.* commands for fs-options."
 msgstr ""
 
-#: disk-utils/fsck.c:1337
+#: disk-utils/fsck.c:1354
 #, fuzzy
 msgid "too many devices"
 msgstr "引数が多すぎます"
 
-#: disk-utils/fsck.c:1349
+#: disk-utils/fsck.c:1366
 #, fuzzy
 msgid "Is /proc mounted?"
 msgstr "その場所は既にマウントされています"
 
-#: disk-utils/fsck.c:1357
+#: disk-utils/fsck.c:1374
 #, fuzzy, c-format
 msgid "must be root to scan for matching filesystems: %s"
 msgstr "一致するファイルシステムが見つかりません: %s\n"
 
-#: disk-utils/fsck.c:1361
+#: disk-utils/fsck.c:1378
 #, fuzzy, c-format
 msgid "couldn't find matching filesystem: %s"
 msgstr "Pixmap ファイルが見つかりませんでした: %s"
 
-#: disk-utils/fsck.c:1369 disk-utils/fsck.c:1457 sys-utils/eject.c:285
+#: disk-utils/fsck.c:1386 disk-utils/fsck.c:1474 sys-utils/eject.c:285
 #, fuzzy
 msgid "too many arguments"
 msgstr "引数が多すぎます"
 
-#: disk-utils/fsck.c:1509
+#: disk-utils/fsck.c:1526
 msgid "the -l option can be used with one device only -- ignore"
 msgstr ""
 
@@ -593,7 +593,7 @@ msgstr ""
 #: disk-utils/fsck.cramfs.c:117
 #, fuzzy
 msgid " -v, --verbose            be more verbose\n"
-msgstr "  -V, --version               バージョン情報を表示して終了\n"
+msgstr "バージョン番号が等しいかをテストします。"
 
 #: disk-utils/fsck.cramfs.c:152
 #, c-format
@@ -845,9 +845,8 @@ msgid " -v  be verbose\n"
 msgstr ""
 
 #: disk-utils/fsck.minix.c:200
-#, fuzzy
 msgid " -s  output super-block information\n"
-msgstr "  -V, --version               バージョン情報を表示して終了\n"
+msgstr ""
 
 #: disk-utils/fsck.minix.c:201
 msgid " -m  activate mode not cleared warnings\n"
@@ -870,14 +869,14 @@ msgid "%s (n/y)? "
 msgstr ""
 
 #: disk-utils/fsck.minix.c:278
-#, fuzzy, c-format
+#, c-format
 msgid "y\n"
-msgstr "'\n"
+msgstr ""
 
 #: disk-utils/fsck.minix.c:280
-#, fuzzy, c-format
+#, c-format
 msgid "n\n"
-msgstr "'\n"
+msgstr ""
 
 #: disk-utils/fsck.minix.c:296
 #, c-format
@@ -1543,7 +1542,7 @@ msgstr "ファイルを閉じることができません"
 #: disk-utils/mkfs.cramfs.c:726
 #, fuzzy
 msgid "invalid blocksize argument"
-msgstr "umount: %s は不正なブロックデバイスです"
+msgstr "%2$s に対する引数 %1$s が間違っています"
 
 #: disk-utils/mkfs.cramfs.c:732
 #, fuzzy
@@ -3286,7 +3285,7 @@ msgstr ""
 #: fdisks/cfdisk.c:2779
 #, fuzzy
 msgid "cannot parse number of cylinders"
-msgstr "   c   シリンダ数を変更する"
+msgstr "シリンダ数を入力してください: "
 
 #: fdisks/cfdisk.c:2789
 #, fuzzy
@@ -7145,7 +7144,7 @@ msgstr "exec %s に失敗"
 #: login-utils/su.c:205
 #, fuzzy, c-format
 msgid "cannot not open session: %s"
-msgstr "%s を open できません"
+msgstr " ファイル '%s' を開けません "
 
 #: login-utils/su.c:215
 #, fuzzy
@@ -7155,12 +7154,12 @@ msgstr "wait_for: プロセス %ld の記録がありません"
 #: login-utils/su.c:227
 #, fuzzy, c-format
 msgid "cannot change directory to %s"
-msgstr "namei: カレントディレクトリにアクセスできません -- %s\n"
+msgstr "ルートディレクトリを '%s' へ変更できません\n"
 
 #: login-utils/su.c:232
 #, fuzzy
 msgid "cannot block signals"
-msgstr " ファイル '%s' を開けません "
+msgstr "プロセスの現在状態からUIDを取得できませんでした\n"
 
 #: login-utils/su.c:246 login-utils/su.c:254 login-utils/su.c:260
 #: sys-utils/cytune.c:170
@@ -7245,7 +7244,7 @@ msgstr ""
 #: login-utils/su.c:808
 #, fuzzy, c-format
 msgid "warning: cannot change directory to %s"
-msgstr "namei: カレントディレクトリにアクセスできません -- %s\n"
+msgstr "ルートディレクトリを '%s' へ変更できません\n"
 
 #: login-utils/sulogin.c:243
 #, fuzzy, c-format
@@ -8112,7 +8111,7 @@ msgstr "プログラムクラッシュデータ"
 #: misc-utils/lsblk.c:144
 #, fuzzy
 msgid "unique storage identifier"
-msgstr "   i   ディスク識別子を変更する"
+msgstr "識別子プレフィックス(_I): "
 
 #: misc-utils/lsblk.c:828
 #, fuzzy, c-format
@@ -8254,7 +8253,7 @@ msgstr ""
 #: misc-utils/lslocks.c:76
 #, fuzzy
 msgid "path of the locked file"
-msgstr " ファイル '%s' を開けません "
+msgstr "ブロックデバイス"
 
 #: misc-utils/lslocks.c:271
 msgid "failed to parse pid"
@@ -8268,7 +8267,7 @@ msgstr "不明な"
 #: misc-utils/lslocks.c:283
 #, fuzzy
 msgid "failed to parse start"
-msgstr "ポート番号の解析に失敗: %s\n"
+msgstr "アドレス '%s' の解析に失敗\n"
 
 #: misc-utils/lslocks.c:290
 #, fuzzy
@@ -8593,7 +8592,7 @@ msgstr ""
 #: misc-utils/wipefs.c:344
 #, fuzzy, c-format
 msgid "%s: offset 0x%jx not found"
-msgstr "umount: %s: 見つかりません"
+msgstr "%s: 見つかりません"
 
 #: misc-utils/wipefs.c:364
 msgid ""
@@ -9846,9 +9845,9 @@ msgid "Failed to set horizontal dispatch mode"
 msgstr "'%s' のモード設定が失敗しました: %s"
 
 #: sys-utils/chcpu.c:143
-#, fuzzy, c-format
+#, c-format
 msgid "Successfully set horizontal dispatching mode\n"
-msgstr "'%s' のモード設定が失敗しました: %s"
+msgstr ""
 
 #: sys-utils/chcpu.c:146
 #, fuzzy
@@ -9856,9 +9855,9 @@ msgid "Failed to set vertical dispatch mode"
 msgstr "'%s' のモード設定が失敗しました: %s"
 
 #: sys-utils/chcpu.c:147
-#, fuzzy, c-format
+#, c-format
 msgid "Successfully set vertical dispatching mode\n"
-msgstr "'%s' のモード設定が失敗しました: %s"
+msgstr ""
 
 #: sys-utils/chcpu.c:165
 #, fuzzy, c-format
@@ -10467,7 +10466,7 @@ msgstr "ブロックデバイスかファイルではありません: %s"
 #: sys-utils/eject.c:650
 #, fuzzy, c-format
 msgid "%s: unmounting"
-msgstr "マウントに失敗しました"
+msgstr "mount: %s をマウントします\n"
 
 #: sys-utils/eject.c:658
 #, fuzzy
@@ -10492,7 +10491,7 @@ msgstr "mount: マウントポイント %s が存在しません"
 #: sys-utils/eject.c:678
 #, fuzzy, c-format
 msgid "unmount of `%s' failed\n"
-msgstr "「%s」から「%s」への移動に失敗: %s\n"
+msgstr "%s への open() が失敗しました"
 
 #: sys-utils/eject.c:719
 #, fuzzy
@@ -10502,7 +10501,7 @@ msgstr "アドレス '%s' の解析に失敗\n"
 #: sys-utils/eject.c:780 sys-utils/eject.c:977
 #, fuzzy, c-format
 msgid "%s: mounted on %s"
-msgstr "%s: 見つかりません"
+msgstr "%s はマウントされています\t "
 
 #: sys-utils/eject.c:877
 #, fuzzy, c-format
@@ -10524,9 +10523,9 @@ msgid "setting CD-ROM speed to %ldX"
 msgstr ""
 
 #: sys-utils/eject.c:946
-#, c-format
+#, fuzzy, c-format
 msgid "default device: `%s'"
-msgstr ""
+msgstr "不正な初期値: %s\n"
 
 #: sys-utils/eject.c:952
 #, fuzzy, c-format
@@ -10561,7 +10560,7 @@ msgstr ""
 #: sys-utils/eject.c:994
 #, fuzzy, c-format
 msgid "%s: is whole-disk device"
-msgstr "ブロックデバイスが必要です"
+msgstr "%s: %s は lp デバイスではありません。\n"
 
 #: sys-utils/eject.c:998
 #, fuzzy, c-format
@@ -12840,12 +12839,12 @@ msgstr "mount: %2$s 内に %1$s を見つけられません"
 #: sys-utils/mount.c:381
 #, fuzzy, c-format
 msgid "can't find mountpoint %s in %s"
-msgstr "mount: %2$s 内に %1$s を見つけられません"
+msgstr "mount: %2$s や %3$s 内に %1$s を見つけられません"
 
 #: sys-utils/mount.c:384
 #, fuzzy, c-format
 msgid "can't find mount source %s in %s"
-msgstr "mount: %2$s 内に %1$s を見つけられません"
+msgstr "unixソケット %sをバインドできません: %s\n"
 
 #: sys-utils/mount.c:389
 #, fuzzy
@@ -12860,7 +12859,7 @@ msgstr "mount: ファイルシステムタイプを指定する必要があり�
 #: sys-utils/mount.c:396
 #, fuzzy, c-format
 msgid "can't find %s"
-msgstr "%s: %s をリンクできません: %s\n"
+msgstr "「%s」を読めません: %s\n"
 
 #: sys-utils/mount.c:398
 #, fuzzy
@@ -12873,9 +12872,9 @@ msgid "failed to parse mount options"
 msgstr "ポート番号の解析に失敗: %s\n"
 
 #: sys-utils/mount.c:410
-#, fuzzy, c-format
+#, c-format
 msgid "%s: failed to setup loop device (probably unknown encryption type)"
-msgstr "'%s' から設定ファイルのパスを取得できませんでした"
+msgstr ""
 
 #: sys-utils/mount.c:416
 #, fuzzy, c-format
@@ -12883,9 +12882,9 @@ msgid "%s: mount failed"
 msgstr "マウントに失敗しました"
 
 #: sys-utils/mount.c:426
-#, fuzzy, c-format
+#, c-format
 msgid "%s: filesystem mounted, but mount(8) failed"
-msgstr "mount: マウントに失敗しました"
+msgstr ""
 
 #: sys-utils/mount.c:443 sys-utils/mount.c:495
 #, fuzzy, c-format
@@ -13895,7 +13894,7 @@ msgstr ""
 #: sys-utils/swapon.c:89
 #, fuzzy
 msgid "device file or partition path"
-msgstr "   d   パーティションを削除する"
+msgstr "ハッシュ・テーブルの書き込みに失敗しました\n"
 
 #: sys-utils/swapon.c:90
 #, fuzzy
@@ -14025,7 +14024,7 @@ msgstr "%s swaponは失敗しました"
 #: sys-utils/swapon.c:607
 #, fuzzy, c-format
 msgid "failed to parse %s"
-msgstr "pid の解析に失敗しました"
+msgstr "アドレス '%s' の解析に失敗\n"
 
 #: sys-utils/swapon.c:650
 msgid ""
@@ -14298,9 +14297,9 @@ msgid "%s: umount failed"
 msgstr "マウントに失敗しました"
 
 #: sys-utils/umount.c:188
-#, fuzzy, c-format
+#, c-format
 msgid "%s: filesystem umounted, but mount(8) failed"
-msgstr "mount: マウントに失敗しました"
+msgstr ""
 
 #: sys-utils/umount.c:202
 #, fuzzy, c-format
@@ -14310,7 +14309,7 @@ msgstr "umount: %s は不正なブロックデバイスです"
 #: sys-utils/umount.c:208
 #, fuzzy, c-format
 msgid "%s: can't write superblock"
-msgstr "mount: %s: スーパーブロックを読めません"
+msgstr "umount: %s: スーパーブロックに書き込めません"
 
 #: sys-utils/umount.c:211
 #, fuzzy, c-format
@@ -14408,9 +14407,8 @@ msgid "flag name"
 msgstr " グループ名 "
 
 #: sys-utils/wdctl.c:71
-#, fuzzy
 msgid "flag description"
-msgstr "ブロックデバイス"
+msgstr ""
 
 #: sys-utils/wdctl.c:72
 #, fuzzy
@@ -14420,7 +14418,7 @@ msgstr "状態"
 #: sys-utils/wdctl.c:73
 #, fuzzy
 msgid "flag boot status"
-msgstr "stat が失敗しました: %s"
+msgstr "%s を stat できません"
 
 #: sys-utils/wdctl.c:74
 #, fuzzy
@@ -14430,7 +14428,7 @@ msgstr "デバイス名:"
 #: sys-utils/wdctl.c:108
 #, fuzzy, c-format
 msgid "unknown flag: %s"
-msgstr "%s: 不明な引数 %s\n"
+msgstr "未知の処理: %s"
 
 #: sys-utils/wdctl.c:145
 #, fuzzy, c-format
@@ -15550,7 +15548,7 @@ msgstr ""
 #: text-utils/pg.c:234
 #, fuzzy
 msgid " -s           print messages to stdout\n"
-msgstr "  -V, --version               バージョン情報を表示して終了\n"
+msgstr "    -? [or --help]:      このメッセージを表示する"
 
 #: text-utils/pg.c:235
 msgid " +number      start at the given line\n"
@@ -15761,127 +15759,11 @@ msgstr "未知のエスケープシーケンスが入力に含まれています
 msgid "Input line too long."
 msgstr "入力ファイルが長すぎます。"
 
-#~ msgid "%s: open failed"
-#~ msgstr "%s: open が失敗"
-
-#, fuzzy
-#~ msgid "cannot open file %s"
-#~ msgstr " ファイル '%s' を開けません "
-
 #, fuzzy
 #~ msgid "cannot stat file %s"
 #~ msgstr ""
 #~ " ファイル \"%s\" を stat できません\n"
 #~ "  %s "
-
-#, fuzzy
-#~ msgid "couldn't open %s"
-#~ msgstr "'%s' を開くことができませんでした: %s"
-
-#~ msgid "open failed: %s"
-#~ msgstr "open が失敗: %s"
-
-#, fuzzy
-#~ msgid "unable to open '%s': %s"
-#~ msgstr "'%s' を開けません: %s"
-
-#, fuzzy
-#~ msgid "failed to open %s"
-#~ msgstr "\"%s\" のオープンに失敗しました: %s\n"
-
-#~ msgid "cannot stat device %s"
-#~ msgstr "デバイス %s を stat できません"
-
-#, fuzzy
-#~ msgid "cannot stat %s"
-#~ msgstr "%s を stat できません"
-
-#, fuzzy
-#~ msgid "%s: failed to open"
-#~ msgstr "\"%s\" のオープンに失敗しました: %s\n"
-
-#~ msgid "Cannot open file '%s'"
-#~ msgstr "ファイル '%s' を開けません"
-
-#~ msgid "unable to open %s"
-#~ msgstr "%s を開けません"
-
-#~ msgid "error: cannot open %s"
-#~ msgstr "error: %s を開けません"
-
-#~ msgid "Failed to open %s for reading, exiting."
-#~ msgstr "%s を読込み用に開けません。終了します"
-
-#, fuzzy
-#~ msgid "cannot open file"
-#~ msgstr " ファイル '%s' を開けません "
-
-#, fuzzy
-#~ msgid "Could not open %s"
-#~ msgstr "%s をオープンできなかった"
-
-#~ msgid "could not stat '%s'"
-#~ msgstr "'%s' を stat できません"
-
-#, fuzzy
-#~ msgid "cannot stat: %s"
-#~ msgstr "%s を stat できません"
-
-#, fuzzy
-#~ msgid "%s: fstat failed"
-#~ msgstr "fstatに失敗しました"
-
-#~ msgid "Cannot open /dev/port"
-#~ msgstr "/dev/port を開けません"
-
-#~ msgid "open() of %s failed"
-#~ msgstr "%s への open() が失敗しました"
-
-#~ msgid "Open of %s failed"
-#~ msgstr "%s のオープンに失敗しました"
-
-#~ msgid "Unable to open %s"
-#~ msgstr "%s をオープンできません"
-
-#, fuzzy
-#~ msgid "only one <source> may be specified"
-#~ msgstr "ファイル名は１つだけ指定できます。"
-
-#, fuzzy
-#~ msgid "failed to allocate source buffer"
-#~ msgstr "%uバイトの画像バッファの確保に失敗しました"
-
-#, fuzzy
-#~ msgid "failed to stat directory"
-#~ msgstr "stat が失敗しました: %s"
-
-#, fuzzy
-#~ msgid "failed to stat %s"
-#~ msgstr "stat が失敗しました: %s"
-
-#, fuzzy
-#~ msgid "failed to stat directory %s"
-#~ msgstr "stat が失敗しました: %s"
-
-#, fuzzy
-#~ msgid "stat %s failed"
-#~ msgstr "stat(%s) 失敗"
-
-#, fuzzy
-#~ msgid "cannot open timing file %s"
-#~ msgstr "マクロ・ファイルを開くのにエラーが発生しました "
-
-#~ msgid "cannot open typescript file %s"
-#~ msgstr "typescript ファイル %s を開けません"
-
-#~ msgid "Cannot open "
-#~ msgstr "開けません"
-
-#~ msgid "cannot open \"%s\" for read"
-#~ msgstr "\"%s\"を読込み用に開けません"
-
-#~ msgid "cannot stat \"%s\""
-#~ msgstr "\"%s\"をstatできません"
 
 #~ msgid ""
 #~ "usage: %s [-hv] [-x dir] file\n"
@@ -15896,12 +15778,20 @@ msgstr "入力ファイルが長すぎます。"
 #~ " -v         be more verbose\n"
 #~ " file       file to test\n"
 
+#~ msgid "open failed: %s"
+#~ msgstr "open が失敗: %s"
+
 #~ msgid "Usage: %s [-larvsmf] /dev/name\n"
 #~ msgstr "使い方: %s [ -larvsmf ] /dev/name\n"
 
-#, fuzzy
-#~ msgid "failed to parse blocksize argument"
-#~ msgstr "ポート番号の解析に失敗: %s\n"
+#~ msgid "unable to open '%s': %s"
+#~ msgstr "'%s' を開けません: %s"
+
+#~ msgid "cannot stat device %s"
+#~ msgstr "デバイス %s を stat できません"
+
+#~ msgid "%s: open failed"
+#~ msgstr "%s: open が失敗"
 
 #, fuzzy
 #~ msgid "error: will not try to make swapdevice on '%s'"
@@ -15924,8 +15814,53 @@ msgstr "入力ファイルが長すぎます。"
 #~ "For more information see swaplabel(8).\n"
 #~ msgstr "より詳しい情報は詳細を参照してください"
 
+#~ msgid "Cannot open file '%s'"
+#~ msgstr "ファイル '%s' を開けません"
+
+#~ msgid "   d   delete a BSD partition"
+#~ msgstr "   d   BSD 領域を削除する"
+
+#~ msgid "   l   list known filesystem types"
+#~ msgstr "   l   既知のファイルシステムタイプをリスト表示する"
+
+#~ msgid "   n   add a new BSD partition"
+#~ msgstr "   n   新たに BSD パーティションを作成する"
+
+#~ msgid "   p   print BSD partition table"
+#~ msgstr "   p   BSD パーティションテーブルを表示する"
+
+#~ msgid "   t   change a partition's filesystem id"
+#~ msgstr "   t   パーティションのファイルシステム ID を変更する"
+
+#~ msgid "   u   change units (cylinders/sectors)"
+#~ msgstr "   u   ユニットの変更(シリンダ/セクタ)"
+
+#~ msgid "   p   print the partition table"
+#~ msgstr "   p   パーティションテーブルを表示する"
+
+#~ msgid ""
+#~ "Building a new DOS disklabel with disk identifier 0x%08x.\n"
+#~ "Changes will remain in memory only, until you decide to write them.\n"
+#~ "After that, of course, the previous content won't be recoverable.\n"
+#~ "\n"
+#~ msgstr ""
+#~ "新たに DOS ディスクラベルをディスク識別子 0x%08x で作成します。\n"
+#~ "あなたが書き込みを決定するまで、変更はメモリ内だけに残します。\n"
+#~ "その後はもちろん以前の内容は修復不可能になります。\n"
+
 #~ msgid "You will not be able to write the partition table.\n"
 #~ msgstr "パーティションテーブルの書き込みを行えません。\n"
+
+#~ msgid ""
+#~ "Device contains neither a valid DOS partition table, nor Sun, SGI or OSF "
+#~ "disklabel\n"
+#~ msgstr ""
+#~ "デバイスは正常な DOS パーティションテーブルも、Sun, SGI や OSF ディスクラ"
+#~ "ベルも\n"
+#~ "含んでいません\n"
+
+#~ msgid "Internal error\n"
+#~ msgstr "内部エラー\n"
 
 #~ msgid "Partition %i does not start on cylinder boundary:\n"
 #~ msgstr "パーティション %i はシリンダ境界で始まっていません:\n"
@@ -15936,15 +15871,38 @@ msgstr "入力ファイルが長すぎます。"
 #~ msgid "should be (%d, %d, %d)\n"
 #~ msgstr "(%d, %d, %d) であるべきです\n"
 
-#~ msgid "Disk %s doesn't contain a valid partition table\n"
-#~ msgstr "ディスク %s は正常なパーティションテーブルを含んでいません\n"
-
 #~ msgid "Cannot open %s\n"
 #~ msgstr "%s を開けません\n"
 
 #~ msgid "This kernel finds the sector size itself - -b option ignored\n"
 #~ msgstr ""
 #~ "このカーネルはセクタサイズを自分認識します - -b オプションは無視します\n"
+
+#~ msgid ""
+#~ "\n"
+#~ "\tSorry, no experts menu for SGI partition tables available.\n"
+#~ "\n"
+#~ msgstr ""
+#~ "\n"
+#~ "\t残念ながら SGI パーティションテーブル用のエキスパートメニューは用意され"
+#~ "ていません。\n"
+#~ "\n"
+
+#~ msgid "Do You know, You got a partition overlap on the disk?\n"
+#~ msgstr "ディスクの領域同士が重複していることを知ってますか？\n"
+
+#~ msgid ""
+#~ "Building a new SGI disklabel. Changes will remain in memory only,\n"
+#~ "until you decide to write them. After that, of course, the previous\n"
+#~ "content will be unrecoverably lost.\n"
+#~ "\n"
+#~ msgstr ""
+#~ "新たな SGI ディスクラベル構築時、変更はその書き込みを決定するまで\n"
+#~ "メモリ内にのみ反映されます。その後はもちろん、以前の内容は失われ、\n"
+#~ "復元は不可能となります。\n"
+
+#~ msgid "out of memory - giving up\n"
+#~ msgstr "メモリが足りません -- 諦めます\n"
 
 #~ msgid "out of memory?\n"
 #~ msgstr "メモリが足りない？\n"
@@ -15963,6 +15921,13 @@ msgstr "入力ファイルが長すぎます。"
 #, fuzzy
 #~ msgid "WARNING: bad format on line %d of %s"
 #~ msgstr "不正な履歴ファイル形式 (%d 行目)"
+
+#, fuzzy
+#~ msgid "couldn't open %s"
+#~ msgstr "'%s' を開くことができませんでした: %s"
+
+#~ msgid "Cannot open /dev/port"
+#~ msgstr "/dev/port を開けません"
 
 #, fuzzy
 #~ msgid "failed to parse epoch"
@@ -16000,254 +15965,33 @@ msgstr "入力ファイルが長すぎます。"
 #~ "%s: --adjfile と --noadjfile オプションは相互排他的ですが、両方が指定され"
 #~ "ました。\n"
 
-#, fuzzy
-#~ msgid "cannot lock group file"
-#~ msgstr "グループid を設定できません"
+#~ msgid "Open of %s failed"
+#~ msgstr "%s のオープンに失敗しました"
+
+#~ msgid "Unable to open %s"
+#~ msgstr "%s をオープンできません"
 
 #, fuzzy
-#~ msgid "the %s file is busy (%s present)"
-#~ msgstr "%s: そのファイル %s は使用中です (現在は %s)\n"
-
-#, fuzzy
-#~ msgid ""
-#~ "\n"
-#~ "For more information see findmnt(1).\n"
-#~ msgstr "より詳しい情報は詳細を参照してください"
-
-#, fuzzy
-#~ msgid "failed to parse timeout"
-#~ msgstr "アドレス '%s' の解析に失敗\n"
-
-#, fuzzy
-#~ msgid "failed to parse sigval"
-#~ msgstr "アドレス '%s' の解析に失敗\n"
-
-#, fuzzy
-#~ msgid "failed to parse port number"
-#~ msgstr "ポート番号の解析に失敗: %s\n"
-
-#, fuzzy
-#~ msgid "port `%ld' out of range"
-#~ msgstr "内部エラー: 範囲外エラーです"
-
-#, fuzzy
-#~ msgid ""
-#~ "\n"
-#~ "For more information see lsblk(8).\n"
-#~ msgstr "より詳しい情報は詳細を参照してください"
-
-#, fuzzy
-#~ msgid "invalid offset value '%s' specified"
-#~ msgstr "AFEの緑のオフセット値"
-
-#, fuzzy
-#~ msgid "--offset and --all are mutually exclusive"
-#~ msgstr "--depth と --set-depth は互いに排他的です"
-
-#, fuzzy
-#~ msgid "warning: failed to read mtab"
-#~ msgstr "ファイル '%2$s' からの %1$s の読み込みに失敗: %3$s"
-
-#, fuzzy
-#~ msgid "the options %s are mutually exclusive"
-#~ msgstr "%s と %s は背反です"
-
-#, fuzzy
-#~ msgid "failed to parse priority"
-#~ msgstr "アドレス '%s' の解析に失敗\n"
-
-#, fuzzy
-#~ msgid "failed to parse class data"
-#~ msgstr "XML データの `%s' への書き込みに失敗しました: %s"
-
-#, fuzzy
-#~ msgid "failed to parse class"
-#~ msgstr "アドレス '%s' の解析に失敗\n"
-
-#, fuzzy
-#~ msgid "failed to parse buffer size"
-#~ msgstr "ポート番号の解析に失敗: %s\n"
-
-#, fuzzy
-#~ msgid ""
-#~ "\n"
-#~ "For more information see fallocate(1).\n"
-#~ msgstr "より詳しい情報は詳細を参照してください"
-
-#, fuzzy
-#~ msgid ""
-#~ "\n"
-#~ "For more information see fstrim(8).\n"
-#~ msgstr "より詳しい情報は詳細を参照してください"
-
-#, fuzzy
-#~ msgid "invalid speed"
-#~ msgstr "不正な速度: %s"
-
-#, fuzzy
-#~ msgid "invalid offset '%s' specified"
-#~ msgstr "無効なプロトコル `%s' が指定されました。\n"
-
-#, fuzzy
-#~ msgid "invalid size '%s' specified"
-#~ msgstr "無効なプロトコル `%s' が指定されました。\n"
-
-#, fuzzy
-#~ msgid "failed to setup loop device"
-#~ msgstr "mount: loop デバイスの設定に失敗しました\n"
-
-#, fuzzy
-#~ msgid "extended and parsable formats are mutually exclusive"
-#~ msgstr "--depth と --set-depth は互いに排他的です"
-
-#, fuzzy
-#~ msgid "--all, --online and --offline options are mutually exclusive"
-#~ msgstr "--depth と --set-depth は互いに排他的です"
-
-#, fuzzy
-#~ msgid ""
-#~ "\n"
-#~ "For more information see mountpoint(1).\n"
-#~ msgstr "より詳しい情報は詳細を参照してください"
-
-#, fuzzy
-#~ msgid "cannot parse PID"
-#~ msgstr "%s を open できません"
-
-#, fuzzy
-#~ msgid "failed to parse seconds value"
-#~ msgstr "警告: bool 型の値 '%s' の解析に失敗しました\n"
-
-#, fuzzy
-#~ msgid "failed to parse time_t value"
-#~ msgstr "警告: bool 型の値 '%s' の解析に失敗しました\n"
-
-#~ msgid "%s: unexpected file format"
-#~ msgstr "%s: 予期しないファイル形式"
-
-#~ msgid "'%s' is unsupported program name (must be 'swapon' or 'swapoff')."
-#~ msgstr ""
-#~ "'%s' はサポートしていないプログラム名です ('swapon' または 'swapoff' であ"
-#~ "るべきです)。"
-
-#, fuzzy
-#~ msgid ""
-#~ "\n"
-#~ "For more information see lsblk(1).\n"
-#~ msgstr "より詳しい情報は詳細を参照してください"
-
-#, fuzzy
-#~ msgid "argument %lu is too large"
-#~ msgstr "整数 '%s' は大きすぎるか、もしくは小さすぎます"
-
-#, fuzzy
-#~ msgid "bad columns width value"
-#~ msgstr "ai_flags の値が不正です"
-
-#, fuzzy
-#~ msgid "bad length value"
-#~ msgstr "不正なレート値 %i"
-
-#, fuzzy
-#~ msgid "bad skip value"
-#~ msgstr "不正なレート値 %i"
-
-#~ msgid ""
-#~ "%s: Usage: %s [-number] [-p string] [-cefnrs] [+line] [+/pattern/] "
-#~ "[files]\n"
-#~ msgstr ""
-#~ "%s: 使い方: %s [-number] [-p string] [-cefnrs] [+line] [+/pattern/] [ファ"
-#~ "イル]\n"
-
-#, fuzzy
-#~ msgid "%s: %d: parse error -- line ignored.\n"
-#~ msgstr "%s: %s 内の %d 行でエラーです\n"
-
-#, fuzzy
-#~ msgid "warning: failed to parse %s"
-#~ msgstr "抽出したカタログの読み込みに失敗しました。"
-
-#, fuzzy
-#~ msgid "%-25s: failed: %s\n"
+#~ msgid "%-20s: failed: %s\n"
 #~ msgstr "fork に失敗しました"
 
 #, fuzzy
-#~ msgid "%-25s: failed\n"
+#~ msgid "%-20s: failed\n"
 #~ msgstr "fork に失敗しました"
-
-#~ msgid "   d   delete a BSD partition"
-#~ msgstr "   d   BSD 領域を削除する"
-
-#~ msgid "   l   list known filesystem types"
-#~ msgstr "   l   既知のファイルシステムタイプをリスト表示する"
-
-#~ msgid "   n   add a new BSD partition"
-#~ msgstr "   n   新たに BSD パーティションを作成する"
-
-#~ msgid "   p   print BSD partition table"
-#~ msgstr "   p   BSD パーティションテーブルを表示する"
-
-#~ msgid "   t   change a partition's filesystem id"
-#~ msgstr "   t   パーティションのファイルシステム ID を変更する"
-
-#~ msgid "   u   change units (cylinders/sectors)"
-#~ msgstr "   u   ユニットの変更(シリンダ/セクタ)"
-
-#~ msgid "   p   print the partition table"
-#~ msgstr "   p   パーティションテーブルを表示する"
-
-#~ msgid ""
-#~ "Building a new DOS disklabel with disk identifier 0x%08x.\n"
-#~ "Changes will remain in memory only, until you decide to write them.\n"
-#~ "After that, of course, the previous content won't be recoverable.\n"
-#~ "\n"
-#~ msgstr ""
-#~ "新たに DOS ディスクラベルをディスク識別子 0x%08x で作成します。\n"
-#~ "あなたが書き込みを決定するまで、変更はメモリ内だけに残します。\n"
-#~ "その後はもちろん以前の内容は修復不可能になります。\n"
-
-#~ msgid ""
-#~ "Device contains neither a valid DOS partition table, nor Sun, SGI or OSF "
-#~ "disklabel\n"
-#~ msgstr ""
-#~ "デバイスは正常な DOS パーティションテーブルも、Sun, SGI や OSF ディスクラ"
-#~ "ベルも\n"
-#~ "含んでいません\n"
-
-#~ msgid "Internal error\n"
-#~ msgstr "内部エラー\n"
-
-#~ msgid ""
-#~ "\n"
-#~ "\tSorry, no experts menu for SGI partition tables available.\n"
-#~ "\n"
-#~ msgstr ""
-#~ "\n"
-#~ "\t残念ながら SGI パーティションテーブル用のエキスパートメニューは用意され"
-#~ "ていません。\n"
-#~ "\n"
-
-#~ msgid "Do You know, You got a partition overlap on the disk?\n"
-#~ msgstr "ディスクの領域同士が重複していることを知ってますか？\n"
-
-#~ msgid ""
-#~ "Building a new SGI disklabel. Changes will remain in memory only,\n"
-#~ "until you decide to write them. After that, of course, the previous\n"
-#~ "content will be unrecoverably lost.\n"
-#~ "\n"
-#~ msgstr ""
-#~ "新たな SGI ディスクラベル構築時、変更はその書き込みを決定するまで\n"
-#~ "メモリ内にのみ反映されます。その後はもちろん、以前の内容は失われ、\n"
-#~ "復元は不可能となります。\n"
-
-#~ msgid "out of memory - giving up\n"
-#~ msgstr "メモリが足りません -- 諦めます\n"
 
 #, fuzzy
 #~ msgid ""
 #~ "\n"
 #~ "For more information see mount(8).\n"
 #~ msgstr "より詳しい情報は詳細を参照してください"
+
+#, fuzzy
+#~ msgid "only one <source> may be specified"
+#~ msgstr "ファイル名は１つだけ指定できます。"
+
+#, fuzzy
+#~ msgid "failed to allocate source buffer"
+#~ msgstr "%uバイトの画像バッファの確保に失敗しました"
 
 #~ msgid "login: memory low, login may fail\n"
 #~ msgstr "login: メモリが少ないので、ログインに失敗するようです\n"
@@ -16299,6 +16043,9 @@ msgstr "入力ファイルが長すぎます。"
 
 #~ msgid "Use %s -l to see list.\n"
 #~ msgstr "リストを見るには、%s -l を使ってください。\n"
+
+#~ msgid "Failed to open %s for reading, exiting."
+#~ msgstr "%s を読込み用に開けません。終了します"
 
 #~ msgid "usage: login [-fp] [username]\n"
 #~ msgstr "使い方: login [-fp] [ユーザ名]\n"
@@ -16370,8 +16117,41 @@ msgstr "入力ファイルが長すぎます。"
 #~ msgid "%s: the group file is busy.\n"
 #~ msgstr "%s: グループファイルは使用中です。\n"
 
+#~ msgid "%s: the %s file is busy (%s present)\n"
+#~ msgstr "%s: そのファイル %s は使用中です (現在は %s)\n"
+
+#~ msgid "%s: can't link %s: %s\n"
+#~ msgstr "%s: %s をリンクできません: %s\n"
+
 #~ msgid "%s: can't unlock %s: %s (your changes are still in %s)\n"
 #~ msgstr "%s: %s のロックを解除できません: %s (変更は %s のままです)\n"
+
+#, fuzzy
+#~ msgid ""
+#~ "\n"
+#~ "For more information see findmnt(1).\n"
+#~ msgstr "より詳しい情報は詳細を参照してください"
+
+#, fuzzy
+#~ msgid "failed to parse port number"
+#~ msgstr "ポート番号の解析に失敗: %s\n"
+
+#, fuzzy
+#~ msgid "port `%ld' out of range"
+#~ msgstr "内部エラー: 範囲外エラーです"
+
+#, fuzzy
+#~ msgid ""
+#~ "\n"
+#~ "For more information see lsblk(8).\n"
+#~ msgstr "より詳しい情報は詳細を参照してください"
+
+#, fuzzy
+#~ msgid "Could not open %s"
+#~ msgstr "%s をオープンできなかった"
+
+#~ msgid "could not stat '%s'"
+#~ msgstr "'%s' を stat できません"
 
 #~ msgid "calloc failed"
 #~ msgstr "calloc が失敗しました"
@@ -16382,6 +16162,18 @@ msgstr "入力ファイルが長すぎます。"
 
 #~ msgid "%s: write failed"
 #~ msgstr "%s: write が失敗"
+
+#, fuzzy
+#~ msgid "invalid offset value '%s' specified"
+#~ msgstr "AFEの緑のオフセット値"
+
+#, fuzzy
+#~ msgid "--offset and --all are mutually exclusive"
+#~ msgstr "--depth と --set-depth は互いに排他的です"
+
+#, fuzzy
+#~ msgid "warning: failed to read mtab"
+#~ msgstr "抽出したカタログの読み込みに失敗しました。"
 
 #~ msgid "%s: /dev directory does not exist."
 #~ msgstr "%s: /dev ディレクトリは存在しません。"
@@ -16439,6 +16231,14 @@ msgstr "入力ファイルが長すぎます。"
 #~ "再コンパイルしてください。\n"
 
 #, fuzzy
+#~ msgid "%s: invalid offset '%s' specified"
+#~ msgstr "無効なプロトコル `%s' が指定されました。\n"
+
+#, fuzzy
+#~ msgid "%s: invalid sizelimit '%s' specified"
+#~ msgstr "無効なプロトコル `%s' が指定されました。\n"
+
+#, fuzzy
 #~ msgid "stolen loop=%s...trying again\n"
 #~ msgstr "gtkvideo: 再試行しません\n"
 
@@ -16447,11 +16247,23 @@ msgstr "入力ファイルが長すぎます。"
 #~ "コンパイル時に loop サポートが有効になっていません。再コンパイルしてくださ"
 #~ "い。\n"
 
+#~ msgid "%s: unexpected file format"
+#~ msgstr "%s: 予期しないファイル形式"
+
+#~ msgid "'%s' is unsupported program name (must be 'swapon' or 'swapoff')."
+#~ msgstr ""
+#~ "'%s' はサポートしていないプログラム名です ('swapon' または 'swapoff' であ"
+#~ "るべきです)。"
+
 #, fuzzy
 #~ msgid ""
 #~ "\n"
 #~ "For more information see partx(8).\n"
 #~ msgstr "より詳しい情報は詳細を参照してください"
+
+#, fuzzy
+#~ msgid "failed to parse class data"
+#~ msgstr "XML データの `%s' への書き込みに失敗しました: %s"
 
 #~ msgid ""
 #~ "Usage: %s [-q [-i interval]] ([-s value]|[-S value]) ([-t value]|[-T "
@@ -16462,6 +16274,16 @@ msgstr "入力ファイルが長すぎます。"
 
 #~ msgid "Can't open %s: %s\n"
 #~ msgstr "%s を開けません: %s\n"
+
+#, fuzzy
+#~ msgid "failed to parse buffer size"
+#~ msgstr "ポート番号の解析に失敗: %s\n"
+
+#, fuzzy
+#~ msgid ""
+#~ "\n"
+#~ "For more information see fallocate(1).\n"
+#~ msgstr "より詳しい情報は詳細を参照してください"
 
 #, fuzzy
 #~ msgid ""
@@ -16498,6 +16320,16 @@ msgstr "入力ファイルが長すぎます。"
 
 #~ msgid "%s: fork failed: %s\n"
 #~ msgstr "%s: 子プロセスの起動に失敗: %s\n"
+
+#, fuzzy
+#~ msgid "%s: fstat failed"
+#~ msgstr "fstatに失敗しました"
+
+#, fuzzy
+#~ msgid ""
+#~ "\n"
+#~ "For more information see fstrim(1).\n"
+#~ msgstr "より詳しい情報は詳細を参照してください"
 
 #, fuzzy
 #~ msgid ""
@@ -16566,9 +16398,21 @@ msgstr "入力ファイルが長すぎます。"
 #~ "使い方: %s [ -dhV78neo12 ] [ -s <speed> ] [ -i [-]<iflag> ] <ldisc> "
 #~ "<device>\n"
 
+#~ msgid "invalid speed: %s"
+#~ msgstr "不正な速度: %s"
+
 #, fuzzy
 #~ msgid "ldattach from %s\n"
 #~ msgstr "クリップボードから(_C)"
+
+#~ msgid "error: cannot open %s"
+#~ msgstr "error: %s を開けません"
+
+#, fuzzy
+#~ msgid ""
+#~ "\n"
+#~ "For more information see mountpoint(1).\n"
+#~ msgstr "より詳しい情報は詳細を参照してください"
 
 #~ msgid ""
 #~ "%s: Usage: \"%s [options]\n"
@@ -16608,6 +16452,14 @@ msgstr "入力ファイルが長すぎます。"
 #~ "For more information see rtcwake(8).\n"
 #~ msgstr "より詳しい情報は詳細を参照してください"
 
+#, fuzzy
+#~ msgid "failed to parse seconds value"
+#~ msgstr "警告: bool 型の値 '%s' の解析に失敗しました\n"
+
+#, fuzzy
+#~ msgid "failed to parse time_t value"
+#~ msgstr "警告: bool 型の値 '%s' の解析に失敗しました\n"
+
 #~ msgid ""
 #~ "\n"
 #~ "For more information see setarch(8).\n"
@@ -16643,6 +16495,49 @@ msgstr "入力ファイルが長すぎます。"
 #~ msgstr ""
 #~ "\n"
 #~ "詳細情報は、unshare(1) を確認してください。\n"
+
+#, fuzzy
+#~ msgid "stat %s failed"
+#~ msgstr "stat(%s) 失敗"
+
+#, fuzzy
+#~ msgid "cannot open timing file %s"
+#~ msgstr "マクロ・ファイルを開くのにエラーが発生しました "
+
+#~ msgid "cannot open typescript file %s"
+#~ msgstr "typescript ファイル %s を開けません"
+
+#, fuzzy
+#~ msgid "argument %lu is too large"
+#~ msgstr "整数 '%s' は大きすぎるか、もしくは小さすぎます"
+
+#, fuzzy
+#~ msgid "bad columns width value"
+#~ msgstr "ai_flags の値が不正です"
+
+#, fuzzy
+#~ msgid "bad length value"
+#~ msgstr "不正なレート値 %i"
+
+#, fuzzy
+#~ msgid "bad skip value"
+#~ msgstr "不正なレート値 %i"
+
+#~ msgid ""
+#~ "%s: Usage: %s [-number] [-p string] [-cefnrs] [+line] [+/pattern/] "
+#~ "[files]\n"
+#~ msgstr ""
+#~ "%s: 使い方: %s [-number] [-p string] [-cefnrs] [+line] [+/pattern/] [ファ"
+#~ "イル]\n"
+
+#~ msgid "Cannot open "
+#~ msgstr "開けません"
+
+#~ msgid "cannot open \"%s\" for read"
+#~ msgstr "\"%s\"を読込み用に開けません"
+
+#~ msgid "cannot stat \"%s\""
+#~ msgstr "\"%s\"をstatできません"
 
 #, fuzzy
 #~ msgid "  %s -V\n"
@@ -16788,9 +16683,6 @@ msgstr "入力ファイルが長すぎます。"
 
 #~ msgid "    -v [or --version]:   print version"
 #~ msgstr "    -v [or --version]:   バージョンを表示する"
-
-#~ msgid "    -? [or --help]:      print this message"
-#~ msgstr "    -? [or --help]:      このメッセージを表示する"
 
 #~ msgid "    -g [or --show-geometry]: print the kernel's idea of the geometry"
 #~ msgstr "    -g [or --show-geometry]: カーネルのジオメトリ情報を表示する"
@@ -17976,9 +17868,6 @@ msgstr "入力ファイルが長すぎます。"
 
 #~ msgid "mount: failed with nfs mount version 4, trying 3..\n"
 #~ msgstr "mount: nfs mount version 4 では失敗しました。3 を試します..\n"
-
-#~ msgid "mount: mounting %s\n"
-#~ msgstr "mount: %s をマウントします\n"
 
 #~ msgid "mount: error while guessing filesystem type\n"
 #~ msgstr "mount: ファイルシステム型推定中にエラーが発生\n"

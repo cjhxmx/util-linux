@@ -473,6 +473,10 @@ static int get_filesystems(const char *filename, char ***filesystems, const char
 	return rc;
 }
 
+/*
+ * Returns zero also if not found any matching filesystem. Always check
+ * @filesystems pointer!
+ */
 int mnt_get_filesystems(char ***filesystems, const char *pattern)
 {
 	int rc;
@@ -610,8 +614,8 @@ static int try_write(const char *filename)
 	if (!filename)
 		return -EINVAL;
 
-	fd = open(filename, O_RDWR|O_CREAT, S_IWUSR| \
-					    S_IRUSR|S_IRGRP|S_IROTH);
+	fd = open(filename, O_RDWR|O_CREAT|O_CLOEXEC,
+			    S_IWUSR|S_IRUSR|S_IRGRP|S_IROTH);
 	if (fd >= 0) {
 		close(fd);
 		return 0;

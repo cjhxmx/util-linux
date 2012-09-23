@@ -150,7 +150,7 @@ static int is_associated_fs(const char *devname, struct libmnt_fs *fs)
 	int flags = 0;
 
 	/* check if it begins with /dev/loop */
-	if (strncmp(devname, _PATH_DEV_LOOP, sizeof(_PATH_DEV_LOOP)))
+	if (strncmp(devname, _PATH_DEV_LOOP, sizeof(_PATH_DEV_LOOP) - 1))
 		return 0;
 
 	src = mnt_fs_get_srcpath(fs);
@@ -615,6 +615,10 @@ int mnt_context_prepare_umount(struct libmnt_context *cxt)
 			/* on fstype based helper */
 			rc = mnt_context_prepare_helper(cxt, "umount", NULL);
 	}
+
+	if (!rc && (cxt->user_mountflags & MNT_MS_LOOP))
+		/* loop option explicitly specified in mtab, detach this loop */
+		mnt_context_enable_loopdel(cxt, TRUE);
 
 	if (!rc && mnt_context_is_loopdel(cxt) && cxt->fs) {
 		const char *src = mnt_fs_get_srcpath(cxt->fs);
