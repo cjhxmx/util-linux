@@ -27,7 +27,7 @@
 
 static int     other_endian = 0;
 
-struct systypes sun_sys_types[] = {
+static struct fdisk_parttype sun_parttypes[] = {
 	{SUN_TAG_UNASSIGNED, N_("Unassigned")},
 	{SUN_TAG_BOOT, N_("Boot")},
 	{SUN_TAG_ROOT, N_("SunOS root")},
@@ -364,13 +364,14 @@ static int sun_verify_disklabel(struct fdisk_context *cxt)
     return 0;
 }
 
-static void sun_add_partition(struct fdisk_context *cxt, int n, int sys)
+static void sun_add_partition(struct fdisk_context *cxt, int n,
+			      struct fdisk_parttype *t)
 {
 	uint32_t starts[SUN_NUM_PARTITIONS], lens[SUN_NUM_PARTITIONS];
 	struct sun_partition *part = &sunlabel->partitions[n];
 	struct sun_tag_flag *tag = &sunlabel->part_tags[n];
 	uint32_t start, stop, stop2;
-	int whole_disk = 0;
+	int whole_disk = 0, sys = t ? t->type : SUN_TAG_LINUX_NATIVE;
 
 	char mesg[256];
 	int i;
@@ -504,41 +505,10 @@ static void sun_delete_partition(struct fdisk_context *cxt, int partnum)
 	part->num_sectors = 0;
 }
 
-int sun_change_sysid(struct fdisk_context *cxt, int i, uint16_t sys)
-{
-	struct sun_partition *part = &sunlabel->partitions[i];
-	struct sun_tag_flag *tag = &sunlabel->part_tags[i];
-
-	if (sys == SUN_TAG_LINUX_SWAP && !part->start_cylinder) {
-	    read_chars(
-	      _("It is highly recommended that the partition at offset 0\n"
-	      "is UFS, EXT2FS filesystem or SunOS swap. Putting Linux swap\n"
-	      "there may destroy your partition table and bootblock.\n"
-	      "Type YES if you're very sure you would like that partition\n"
-	      "tagged with 82 (Linux swap): "));
-	    if (strcmp (line_ptr, _("YES\n")))
-		    return 0;
-	}
-	switch (sys) {
-	case SUN_TAG_SWAP:
-	case SUN_TAG_LINUX_SWAP:
-		/* swaps are not mountable by default */
-		tag->flag |= SSWAP16(SUN_FLAG_UNMNT);
-		break;
-	default:
-		/* assume other types are mountable;
-		   user can change it anyway */
-		tag->flag &= ~SSWAP16(SUN_FLAG_UNMNT);
-		break;
-	}
-	tag->tag = SSWAP16(sys);
-	return 1;
-}
 
 void sun_list_table(struct fdisk_context *cxt, int xtra)
 {
 	int i, w;
-	char *type;
 
 	w = strlen(cxt->dev_path);
 	if (xtra)
@@ -573,6 +543,8 @@ void sun_list_table(struct fdisk_context *cxt, int xtra)
 		if (part->num_sectors) {
 			uint32_t start = SSWAP32(part->start_cylinder) * cxt->geom.heads * cxt->geom.sectors;
 			uint32_t len = SSWAP32(part->num_sectors);
+			struct fdisk_parttype *t = fdisk_get_partition_type(cxt, i);
+
 			printf(
 			    "%s %c%c %9lu %9lu %9lu%c  %2x  %s\n",
 /* device */		  partname(cxt->dev_path, i+1, w),
@@ -581,9 +553,10 @@ void sun_list_table(struct fdisk_context *cxt, int xtra)
 /* start */		  (unsigned long) scround(start),
 /* end */		  (unsigned long) scround(start+len),
 /* odd flag on end */	  (unsigned long) len / 2, len & 1 ? '+' : ' ',
-/* type id */		  SSWAP16(tag->tag),
-/* type name */		  (type = partition_type(SSWAP16(tag->tag)))
-			        ? type : _("Unknown"));
+/* type id */		  t->type,
+/* type name */		  t->name);
+
+			fdisk_free_parttype(t);
 		}
 	}
 }
@@ -644,18 +617,75 @@ static int sun_write_disklabel(struct fdisk_context *cxt)
 	return 0;
 }
 
-int sun_get_sysid(struct fdisk_context *cxt, int i)
+static struct fdisk_parttype *sun_get_parttype(struct fdisk_context *cxt, int n)
 {
-	return SSWAP16(sunlabel->part_tags[i].tag);
+	struct fdisk_parttype *t;
+
+	if (n >= partitions)
+		return NULL;
+
+	t = fdisk_get_parttype_from_code(cxt, SSWAP16(sunlabel->part_tags[n].tag));
+	if (!t)
+		t = fdisk_new_unknown_parttype(SSWAP16(sunlabel->part_tags[n].tag), NULL);
+	return t;
+}
+
+static int sun_set_parttype(struct fdisk_context *cxt, int i,
+			    struct fdisk_parttype *t)
+{
+	struct sun_partition *part;
+	struct sun_tag_flag *tag;
+
+	if (i >= partitions || !t || t->type > UINT16_MAX)
+		return -EINVAL;
+
+	if (i == 2 && t->type != SUN_TAG_BACKUP)
+		printf(_("Consider leaving partition 3 as Whole disk (5),\n"
+		         "as SunOS/Solaris expects it and even Linux likes it.\n\n"));
+
+	part = &sunlabel->partitions[i];
+	tag = &sunlabel->part_tags[i];
+
+	if (t->type == SUN_TAG_LINUX_SWAP && !part->start_cylinder) {
+	    read_chars(
+	      _("It is highly recommended that the partition at offset 0\n"
+	      "is UFS, EXT2FS filesystem or SunOS swap. Putting Linux swap\n"
+	      "there may destroy your partition table and bootblock.\n"
+	      "Type YES if you're very sure you would like that partition\n"
+	      "tagged with 82 (Linux swap): "));
+	    if (strcmp (line_ptr, _("YES\n")))
+		    return 1;
+	}
+
+	switch (t->type) {
+	case SUN_TAG_SWAP:
+	case SUN_TAG_LINUX_SWAP:
+		/* swaps are not mountable by default */
+		tag->flag |= SSWAP16(SUN_FLAG_UNMNT);
+		break;
+	default:
+		/* assume other types are mountable;
+		   user can change it anyway */
+		tag->flag &= ~SSWAP16(SUN_FLAG_UNMNT);
+		break;
+	}
+	tag->tag = SSWAP16(t->type);
+	return 0;
 }
 
 const struct fdisk_label sun_label =
 {
 	.name = "sun",
+	.parttypes = sun_parttypes,
+	.nparttypes = ARRAY_SIZE(sun_parttypes),
+
 	.probe = sun_probe_label,
 	.write = sun_write_disklabel,
 	.verify = sun_verify_disklabel,
 	.create = sun_create_disklabel,
 	.part_add = sun_add_partition,
 	.part_delete = sun_delete_partition,
+	.part_get_type = sun_get_parttype,
+	.part_set_type = sun_set_parttype,
+
 };

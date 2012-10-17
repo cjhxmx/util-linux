@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <ctype.h>
 #ifdef HAVE_LIBBLKID
 #include <blkid.h>
 #endif
@@ -39,6 +40,7 @@ int fdisk_debug_mask;
  */
 static const struct fdisk_label *labels[] =
 {
+	&gpt_label,
 	&dos_label,
 	&sun_label,
 	&sgi_label,
@@ -87,20 +89,22 @@ int fdisk_verify_disklabel(struct fdisk_context *cxt)
  * fdisk_add_partition:
  * @cxt: fdisk context
  * @partnum: partition number to create
- * @parttype: partition type to create
+ * @t: partition type to create or NULL for label-specific default
  *
  * Creates a new partition, with number @partnum and type @parttype.
  *
  * Returns 0.
  */
-int fdisk_add_partition(struct fdisk_context *cxt, int partnum, int parttype)
+int fdisk_add_partition(struct fdisk_context *cxt, int partnum,
+			struct fdisk_parttype *t)
 {
 	if (!cxt || !cxt->label)
 		return -EINVAL;
 	if (!cxt->label->part_add)
 		return -ENOSYS;
 
-	cxt->label->part_add(cxt, partnum, parttype);
+	DBG(LABEL, dbgprint("adding new partition number %d", partnum));
+	cxt->label->part_add(cxt, partnum, t);
 	return 0;
 }
 
@@ -492,8 +496,9 @@ struct fdisk_context *fdisk_new_context_from_filename(const char *fname, int rea
 
 	update_sector_offset(cxt);
 
-	DBG(CONTEXT, dbgprint("context initialized for %s [%s]",
-			      fname, readonly ? "READ-ONLY" : "READ-WRITE"));
+	DBG(CONTEXT, dbgprint("context %p initialized for %s [%s]",
+			      cxt, fname,
+			      readonly ? "READ-ONLY" : "READ-WRITE"));
 	return cxt;
 fail:
 	errsv = errno;
@@ -515,9 +520,198 @@ void fdisk_free_context(struct fdisk_context *cxt)
 	if (!cxt)
 		return;
 
-	DBG(CONTEXT, dbgprint("freeing context for %s", cxt->dev_path));
+	DBG(CONTEXT, dbgprint("freeing context %p for %s", cxt, cxt->dev_path));
 	close(cxt->dev_fd);
 	free(cxt->dev_path);
 	free(cxt->firstsector);
 	free(cxt);
 }
+
+/*
+ * fdisk_get_nparttypes:
+ *
+ * Returns: number of partition types supported by the current label
+ */
+size_t fdisk_get_nparttypes(struct fdisk_context *cxt)
+{
+	if (!cxt || !cxt->label)
+		return 0;
+
+	return cxt->label->nparttypes;
+}
+
+/*
+ * Search in lable-specific table of supported partition types by code.
+ */
+struct fdisk_parttype *fdisk_get_parttype_from_code(
+				struct fdisk_context *cxt,
+				unsigned int code)
+{
+	size_t i;
+
+	if (!fdisk_get_nparttypes(cxt))
+		return NULL;
+
+	for (i = 0; i < cxt->label->nparttypes; i++)
+		if (cxt->label->parttypes[i].type == code)
+			return &cxt->label->parttypes[i];
+
+	return NULL;
+}
+
+/*
+ * Search in lable-specific table of supported partition types by typestr.
+ */
+struct fdisk_parttype *fdisk_get_parttype_from_string(
+				struct fdisk_context *cxt,
+				const char *str)
+{
+	size_t i;
+
+	if (!fdisk_get_nparttypes(cxt))
+		return NULL;
+
+	for (i = 0; i < cxt->label->nparttypes; i++)
+		if (cxt->label->parttypes[i].typestr
+		    &&strcasecmp(cxt->label->parttypes[i].typestr, str) == 0)
+			return &cxt->label->parttypes[i];
+
+	return NULL;
+}
+
+/*
+ * Allocates new 'unknown' partition type. Use fdisk_free_parttype() to
+ * deallocate.
+ */
+struct fdisk_parttype *fdisk_new_unknown_parttype(unsigned int type,
+						  const char *typestr)
+{
+	struct fdisk_parttype *t;
+
+	t = calloc(1, sizeof(*t));
+	if (!t)
+		return NULL;
+
+	if (typestr) {
+		t->typestr = strdup(typestr);
+		if (!t->typestr) {
+			free(t);
+			return NULL;
+		}
+	}
+	t->name = _("unknown");
+	t->type = type;
+	t->flags |= FDISK_PARTTYPE_UNKNOWN | FDISK_PARTTYPE_ALLOCATED;
+
+	DBG(LABEL, dbgprint("allocated new unknown type [%p]", t));
+	return t;
+}
+
+/*
+ * fdisk_parse_parttype
+ * @cxt: fdisk context
+ * @str: string
+ *
+ * Returns pointer to static table of the partition types, or newly allocated
+ * partition type for unknown types. It's safe to call fdisk_free_parttype()
+ * for all results.
+ */
+struct fdisk_parttype *fdisk_parse_parttype(
+				struct fdisk_context *cxt,
+				const char *str)
+{
+	struct fdisk_parttype *types, *ret;
+	unsigned int code = 0;
+	char *typestr = NULL, *end = NULL;
+
+	if (!fdisk_get_nparttypes(cxt))
+		return NULL;
+
+	DBG(LABEL, dbgprint("parsing '%s' partition type", str));
+
+	types = cxt->label->parttypes;
+
+	if (types[0].typestr == NULL && isxdigit(*str)) {
+
+		errno = 0;
+		code = strtol(str, &end, 16);
+
+		if (errno || *end != '\0') {
+			DBG(LABEL, dbgprint("parsing failed: %m"));
+			return NULL;
+		}
+		ret = fdisk_get_parttype_from_code(cxt, code);
+		if (ret)
+			goto done;
+	} else {
+		int i;
+
+		/* maybe specified by type string (e.g. UUID) */
+		ret = fdisk_get_parttype_from_string(cxt, str);
+		if (ret)
+			goto done;
+
+		/* maybe specified by order number */
+		errno = 0;
+		i = strtol(str, &end, 0);
+		if (errno == 0 && *end == '\0' && i > 0
+		    && i - 1 < (int) fdisk_get_nparttypes(cxt)) {
+			ret = &types[i - 1];
+			goto done;
+		}
+	}
+
+	ret = fdisk_new_unknown_parttype(code, typestr);
+done:
+	DBG(LABEL, dbgprint("returns '%s' partition type", ret->name));
+	return ret;
+}
+
+/*
+ * fdisk_free_parttype:
+ *
+ * Free the @type.
+ */
+void fdisk_free_parttype(struct fdisk_parttype *t)
+{
+	if (t && (t->flags & FDISK_PARTTYPE_ALLOCATED)) {
+		DBG(LABEL, dbgprint("freeing %p partition type", t));
+		free(t->typestr);
+		free(t);
+	}
+}
+
+/**
+ * fdisk_get_partition_type:
+ * @cxt: fdisk context
+ * @partnum: partition number
+ *
+ * Returns partition type
+ */
+struct fdisk_parttype *fdisk_get_partition_type(struct fdisk_context *cxt, int partnum)
+{
+	if (!cxt || !cxt->label || !cxt->label->part_get_type)
+		return NULL;
+
+	DBG(LABEL, dbgprint("partition: %d: get type", partnum));
+	return cxt->label->part_get_type(cxt, partnum);
+}
+
+/**
+ * fdisk_set_partition_type:
+ * @cxt: fdisk context
+ * @partnum: partition number
+ * @t: new type
+ *
+ * Returns partition type
+ */
+int fdisk_set_partition_type(struct fdisk_context *cxt, int partnum,
+			     struct fdisk_parttype *t)
+{
+	if (!cxt || !cxt->label || !cxt->label->part_set_type)
+		return -EINVAL;
+
+	DBG(LABEL, dbgprint("partition: %d: set type", partnum));
+	return cxt->label->part_set_type(cxt, partnum, t);
+}
+

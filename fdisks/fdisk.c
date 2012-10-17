@@ -83,7 +83,7 @@ static const struct menulist_descr menulist[] = {
 	{'c', N_("toggle the mountable flag"), {SUN_LABEL, 0}},
 	{'c', N_("select sgi swap partition"), {SGI_LABEL, 0}},
 	{'c', N_("change number of cylinders"), {0, DOS_LABEL | SUN_LABEL}},
-	{'d', N_("delete a partition"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL, 0}},
+	{'d', N_("delete a partition"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL | GPT_LABEL, 0}},
 	{'d', N_("print the raw data in the partition table"), {0, ANY_LABEL}},
 	{'e', N_("change number of extra sectors per cylinder"), {0, SUN_LABEL}},
 	{'e', N_("list extended partitions"), {0, DOS_LABEL}},
@@ -94,9 +94,9 @@ static const struct menulist_descr menulist[] = {
 	{'i', N_("change interleave factor"), {0, SUN_LABEL}},
 	{'i', N_("change the disk identifier"), {0, DOS_LABEL}},
 	{'i', N_("install bootstrap"), {OSF_LABEL, 0}},
-	{'l', N_("list known partition types"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL, 0}},
+	{'l', N_("list known partition types"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL  | GPT_LABEL, 0}},
 	{'m', N_("print this menu"), {ANY_LABEL, ANY_LABEL}},
-	{'n', N_("add a new partition"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL, 0}},
+	{'n', N_("add a new partition"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL | GPT_LABEL, 0}},
 	{'o', N_("create a new empty DOS partition table"), {~OSF_LABEL, 0}},
 	{'o', N_("change rotation speed (rpm)"), {0, SUN_LABEL}},
 	{'p', N_("print the partition table"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL, DOS_LABEL | SUN_LABEL}},
@@ -108,7 +108,7 @@ static const struct menulist_descr menulist[] = {
 	{'t', N_("change a partition's system id"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL, 0}},
 	{'u', N_("change display/entry units"), {DOS_LABEL | SUN_LABEL | SGI_LABEL | OSF_LABEL, 0}},
 	{'v', N_("verify the partition table"), {DOS_LABEL | SUN_LABEL | SGI_LABEL, DOS_LABEL | SUN_LABEL | SGI_LABEL}},
-	{'w', N_("write table to disk and exit"), {DOS_LABEL | SUN_LABEL | SGI_LABEL, DOS_LABEL | SUN_LABEL | SGI_LABEL}},
+	{'w', N_("write table to disk and exit"), {DOS_LABEL | SUN_LABEL | SGI_LABEL  | GPT_LABEL, DOS_LABEL | SUN_LABEL | SGI_LABEL}},
 	{'w', N_("write disklabel to disk"), {OSF_LABEL, 0}},
 	{'x', N_("extra functionality (experts only)"), {DOS_LABEL | SUN_LABEL | SGI_LABEL, 0}},
 #if !defined (__alpha__)
@@ -116,6 +116,8 @@ static const struct menulist_descr menulist[] = {
 #endif
 	{'y', N_("change number of physical cylinders"), {0, SUN_LABEL}},
 };
+
+
 
 sector_t get_nr_sects(struct partition *p) {
 	return read4_little_endian(p->size4);
@@ -126,7 +128,6 @@ char	*line_ptr,			/* interactive input */
 
 int	nowarn = 0,			/* no warnings for fdisk -l/-s */
 	dos_compatible_flag = 0,	/* disabled by default */
-	dos_changed = 0,
 	partitions = 4;			/* maximum partition + 1 */
 
 unsigned int	user_cylinders, user_heads, user_sectors;
@@ -218,65 +219,61 @@ void print_menu(enum menutype menu)
 			printf("   %c   %s\n", menulist[i].command, menulist[i].description);
 }
 
-static int
-get_sysid(struct fdisk_context *cxt, int i) {
-	return (
-		disklabel == SUN_LABEL ? sun_get_sysid(cxt, i) :
-		disklabel == SGI_LABEL ? sgi_get_sysid(cxt, i) :
-		ptes[i].part_table->sys_ind);
-}
-
-static struct systypes *
-get_sys_types(void) {
-	return (
-		disklabel == SUN_LABEL ? sun_sys_types :
-		disklabel == SGI_LABEL ? sgi_sys_types :
-		i386_sys_types);
-}
-
-char *partition_type(unsigned char type)
+void list_partition_types(struct fdisk_context *cxt)
 {
-	int i;
-	struct systypes *types = get_sys_types();
-
-	for (i=0; types[i].name; i++)
-		if (types[i].type == type)
-			return _(types[i].name);
-
-	return NULL;
-}
-
-void list_types(struct systypes *sys)
-{
-	unsigned int last[4], done = 0, next = 0, size;
+	struct fdisk_parttype *types;
 	int i;
 
-	for (i = 0; sys[i].name; i++);
-	size = i;
+	if (!cxt || !cxt->label || !cxt->label->parttypes)
+		return;
 
-	for (i = 3; i >= 0; i--)
-		last[3 - i] = done += (size + i - done) / (i + 1);
-	i = done = 0;
+	types = cxt->label->parttypes;
 
-	do {
-		#define NAME_WIDTH 15
-		char name[NAME_WIDTH * MB_LEN_MAX];
-		size_t width = NAME_WIDTH;
+	if (types[0].typestr == NULL) {
+		/*
+		 * Prints in 4 columns in format <hex> <name>
+		 */
+		unsigned int last[4], done = 0, next = 0, size;
 
-		printf("%c%2x  ", i ? ' ' : '\n', sys[next].type);
-		size_t ret = mbsalign(_(sys[next].name), name, sizeof(name),
-				      &width, MBS_ALIGN_LEFT, 0);
-		if (ret == (size_t)-1 || ret >= sizeof(name))
-			printf("%-15.15s", _(sys[next].name));
-		else
-			fputs(name, stdout);
+		for (i = 0; types[i].name; i++);
+		size = i;
 
-		next = last[i++] + done;
-		if (i > 3 || next >= last[i]) {
-			i = 0;
-			next = ++done;
-		}
-	} while (done < last[0]);
+		for (i = 3; i >= 0; i--)
+			last[3 - i] = done += (size + i - done) / (i + 1);
+		i = done = 0;
+
+		do {
+			#define NAME_WIDTH 15
+			char name[NAME_WIDTH * MB_LEN_MAX];
+			size_t width = NAME_WIDTH;
+			struct fdisk_parttype *t = &types[next];
+			size_t ret;
+
+			printf("%c%2x  ", i ? ' ' : '\n', t->type);
+			ret = mbsalign(_(t->name), name, sizeof(name),
+					      &width, MBS_ALIGN_LEFT, 0);
+
+			if (ret == (size_t)-1 || ret >= sizeof(name))
+				printf("%-15.15s", _(t->name));
+			else
+				fputs(name, stdout);
+
+			next = last[i++] + done;
+			if (i > 3 || next >= last[i]) {
+				i = 0;
+				next = ++done;
+			}
+		} while (done < last[0]);
+
+	} else {
+		/*
+		 * Prints 1 column in format <idx> <name> <typestr>
+		 */
+		struct fdisk_parttype *t;
+
+		for (i = 0, t = types; t->name; t++, i++)
+			printf("%3d %-30s %s\n", i + 1, t->name, t->typestr);
+	}
 	putchar('\n');
 }
 
@@ -562,26 +559,33 @@ read_chars(char *mesg)
 	return *line_ptr;
 }
 
-int
-read_hex(struct systypes *sys)
+struct fdisk_parttype *read_partition_type(struct fdisk_context *cxt)
 {
-        int hex;
+	if (!cxt || !cxt->label || !cxt->label->nparttypes)
+		return NULL;
 
-        while (1)
-        {
-           read_char(_("Hex code (type L to list codes): "));
-           if (tolower(*line_ptr) == 'l')
-               list_types(sys);
-	   else if (isxdigit (*line_ptr))
-	   {
-	      hex = 0;
-	      do
-		 hex = hex << 4 | hex_val(*line_ptr++);
-	      while (isxdigit(*line_ptr));
-	      return hex;
-	   }
-        }
+        do {
+		size_t sz;
+
+		if (cxt->label->parttypes[0].typestr)
+			read_chars(_("Partition type (type L to list all types): "));
+		else
+			read_chars(_("Hex code (type L to list all codes): "));
+
+		sz = strlen(line_ptr);
+		if (!sz || line_ptr[sz - 1] != '\n' || sz == 1)
+			continue;
+		line_ptr[sz - 1] = '\0';
+
+		if (tolower(*line_ptr) == 'l')
+			list_partition_types(cxt);
+		else
+			return fdisk_parse_parttype(cxt, line_ptr);
+        } while (1);
+
+	return NULL;
 }
+
 
 unsigned int
 read_int_with_suffix(struct fdisk_context *cxt,
@@ -736,7 +740,7 @@ get_partition_dflt(struct fdisk_context *cxt, int warn, int max, int dflt) {
 	i = read_int(cxt, 1, dflt, max, 0, _("Partition number")) - 1;
 	pe = &ptes[i];
 
-	if (warn) {
+	if (warn && disklabel != GPT_LABEL) {
 		if ((disklabel != SUN_LABEL && disklabel != SGI_LABEL && !pe->part_table->sys_ind)
 		    || (disklabel == SUN_LABEL &&
 			(!sunlabel->partitions[i].num_sectors ||
@@ -841,79 +845,39 @@ static void delete_partition(struct fdisk_context *cxt, int partnum)
 	printf(_("Partition %d is deleted\n"), partnum + 1);
 }
 
-static void change_sysid(struct fdisk_context *cxt)
+static void change_partition_type(struct fdisk_context *cxt)
 {
-	char *temp;
-	int i, sys, origsys;
-	struct partition *p;
+	int i;
+	struct fdisk_parttype *t, *org_t;
 
 	i = get_existing_partition(cxt, 0, partitions);
-
 	if (i == -1)
 		return;
-	p = ptes[i].part_table;
-	origsys = sys = get_sysid(cxt, i);
 
-	/* if changing types T to 0 is allowed, then
-	   the reverse change must be allowed, too */
-	if (!sys && disklabel != SGI_LABEL && disklabel != SUN_LABEL && !get_nr_sects(p))
+	org_t = t = fdisk_get_partition_type(cxt, i);
+	if (!t)
                 printf(_("Partition %d does not exist yet!\n"), i + 1);
-        else while (1) {
-		sys = read_hex (get_sys_types());
 
-		if (!sys && disklabel != SGI_LABEL && disklabel != SUN_LABEL) {
-			printf(_("Type 0 means free space to many systems\n"
-			       "(but not to Linux). Having partitions of\n"
-			       "type 0 is probably unwise. You can delete\n"
-			       "a partition using the `d' command.\n"));
-			/* break; */
+        else do {
+		t = read_partition_type(cxt);
+		if (!t)
+			continue;
+
+		if (fdisk_set_partition_type(cxt, i, t) == 0) {
+			ptes[i].changed = 1;
+			printf (_("Changed type of partition '%s' to '%s'\n"),
+				org_t ? org_t->name : _("Unknown"),
+				    t ?     t->name : _("Unknown"));
+		} else {
+			printf (_("Type of partition %d is unchanged: %s\n"),
+				i + 1,
+				org_t ? org_t->name : _("Unknown"));
 		}
+		break;
+        } while (1);
 
-		if (disklabel != SGI_LABEL && disklabel != SUN_LABEL) {
-			if (IS_EXTENDED (sys) != IS_EXTENDED (p->sys_ind)) {
-				printf(_("You cannot change a partition into"
-				       " an extended one or vice versa\n"
-				       "Delete it first.\n"));
-				break;
-			}
-		}
-
-                if (sys < 256) {
-			if (disklabel == SUN_LABEL && i == 2 && sys != SUN_TAG_BACKUP)
-				printf(_("Consider leaving partition 3 "
-				       "as Whole disk (5),\n"
-				       "as SunOS/Solaris expects it and "
-				       "even Linux likes it.\n\n"));
-			if (disklabel == SGI_LABEL && ((i == 10 && sys != ENTIRE_DISK)
-					  || (i == 8 && sys != 0)))
-				printf(_("Consider leaving partition 9 "
-				       "as volume header (0),\nand "
-				       "partition 11 as entire volume (6), "
-				       "as IRIX expects it.\n\n"));
-                        if (sys == origsys)
-				break;
-			if (disklabel == SUN_LABEL) {
-				ptes[i].changed = sun_change_sysid(cxt, i, sys);
-			} else
-			if (disklabel == SGI_LABEL) {
-				ptes[i].changed = sgi_change_sysid(cxt, i, sys);
-			} else {
-				p->sys_ind = sys;
-				ptes[i].changed = 1;
-			}
-			temp = partition_type(sys) ? : _("Unknown");
-			if (ptes[i].changed)
-				printf (_("Changed system type of partition %d "
-				        "to %x (%s)\n"), i + 1, sys, temp);
-			else
-				printf (_("System type of partition %d is unchanged: "
-				        "%x (%s)\n"), i + 1, sys, temp);
-			if (is_dos_partition(origsys) ||
-			    is_dos_partition(sys))
-				dos_changed = 1;
-                        break;
-                }
-        }
+	fdisk_free_parttype(t);
+	fdisk_free_parttype(org_t);
 }
 
 /* check_consistency() and long2chs() added Sat Mar 6 12:28:16 1993,
@@ -1158,10 +1122,9 @@ fix_partition_table_order(void) {
 
 }
 
-static void
-list_table(struct fdisk_context *cxt, int xtra) {
+static void list_table(struct fdisk_context *cxt, int xtra)
+{
 	struct partition *p;
-	char *type;
 	int i, w;
 
 	if (disklabel == SUN_LABEL) {
@@ -1175,6 +1138,11 @@ list_table(struct fdisk_context *cxt, int xtra) {
 	}
 
 	list_disk_geometry(cxt);
+
+	if (disklabel == GPT_LABEL) {
+		gpt_list_table(cxt, xtra);
+		return;
+	}
 
 	if (disklabel == OSF_LABEL) {
 		xbsd_print_disklabel(cxt, xtra);
@@ -1206,6 +1174,8 @@ list_table(struct fdisk_context *cxt, int xtra) {
 			unsigned int psects = get_nr_sects(p);
 			unsigned int pblocks = psects;
 			unsigned int podd = 0;
+			struct fdisk_parttype *type =
+					fdisk_get_parttype_from_code(cxt, p->sys_ind);
 
 			if (cxt->sector_size < 1024) {
 				pblocks /= (1024 / cxt->sector_size);
@@ -1223,8 +1193,7 @@ list_table(struct fdisk_context *cxt, int xtra) {
 				- (psects ? 1 : 0)),
 /* odd flag on end */	(unsigned long) pblocks, podd ? '+' : ' ',
 /* type id */		p->sys_ind,
-/* type name */		(type = partition_type(p->sys_ind)) ?
-			type : _("Unknown"));
+/* type name */		type ? type->name : _("Unknown"));
 			check_consistency(cxt, p, i);
 			check_alignment(cxt, get_partition_start(pe), i);
 		}
@@ -1325,7 +1294,10 @@ void print_partition_size(struct fdisk_context *cxt,
 {
 	char *str = size_to_human_string(SIZE_SUFFIX_3LETTER | SIZE_SUFFIX_SPACE,
 				     (uint64_t)(stop - start + 1) * cxt->sector_size);
-	printf(_("Partition %d of type %s and of size %s is set\n"), num, partition_type(sysid), str);
+	struct fdisk_parttype *t = fdisk_get_parttype_from_code(cxt, sysid);
+
+	printf(_("Partition %d of type %s and of size %s is set\n"),
+			num, t ? t->name : _("Unknown"), str);
 	free(str);
 }
 
@@ -1336,14 +1308,11 @@ static void new_partition(struct fdisk_context *cxt)
 	if (warn_geometry(cxt))
 		return;
 
-	if (disklabel == SUN_LABEL || disklabel == SGI_LABEL)
+	if (disklabel == SUN_LABEL || disklabel == SGI_LABEL
+		|| disklabel == GPT_LABEL)
 		partnum = get_partition(cxt, 0, partitions);
 
-	/*
-	 * Use default LINUX_NATIVE partition type, DOS labels
-	 * may override this internally.
-	 */
-	fdisk_add_partition(cxt, partnum, LINUX_NATIVE);
+	fdisk_add_partition(cxt, partnum, NULL);
 }
 
 static void write_table(struct fdisk_context *cxt)
@@ -1381,12 +1350,6 @@ reread_partition_table(struct fdisk_context *cxt, int leave) {
 			 "the next reboot or after you run partprobe(8) or kpartx(8)\n"),
 			errno);
 	}
-
-	if (dos_changed)
-	    printf(
-		_("\nWARNING: If you have created or modified any DOS 6.x\n"
-		"partitions, please see the fdisk manual page for additional\n"
-		"information.\n"));
 
 	if (leave) {
 		if (fsync(cxt->dev_fd) || close(cxt->dev_fd)) {
@@ -1592,14 +1555,6 @@ static int is_ide_cdrom_or_tape(char *device)
 	return ret;
 }
 
-static void
-gpt_warning(char *dev)
-{
-	if (dev && gpt_probe_signature_devname(dev))
-		fprintf(stderr, _("\nWARNING: GPT (GUID Partition Table) detected on '%s'! "
-			"The util fdisk doesn't support GPT. Use GNU Parted.\n\n"), dev);
-}
-
 /* Print disk geometry and partition table of a specified device (-l option) */
 static void print_partition_table_from_option(char *device, unsigned long sector_size)
 {
@@ -1615,7 +1570,6 @@ static void print_partition_table_from_option(char *device, unsigned long sector
 	if (user_cylinders || user_heads || user_sectors)
 		fdisk_context_set_user_geometry(cxt, user_cylinders,
 					user_heads, user_sectors);
-	gpt_warning(device);
 
 	if (!fdisk_dev_has_disklabel(cxt)) {
 		/*
@@ -1744,7 +1698,7 @@ static void command_prompt(struct fdisk_context *cxt)
 				unknown_command(c);
 			break;
 		case 'l':
-			list_types(get_sys_types());
+			list_partition_types(cxt);
 			break;
 		case 'm':
 			print_menu(MAIN_MENU);
@@ -1764,7 +1718,7 @@ static void command_prompt(struct fdisk_context *cxt)
 			fdisk_create_disklabel(cxt, "sun");
 			break;
 		case 't':
-			change_sysid(cxt);
+			change_partition_type(cxt);
 			break;
 		case 'u':
 			change_units(cxt);
@@ -1920,8 +1874,6 @@ int main(int argc, char **argv)
 	if (!fdisk_dev_sectsz_is_default(cxt))
 		printf(_("Note: sector size is %ld (not %d)\n"),
 		       cxt->sector_size, DEFAULT_SECTOR_SIZE);
-
-	gpt_warning(cxt->dev_path);
 
 	if (!fdisk_dev_has_disklabel(cxt)) {
 		fprintf(stderr,

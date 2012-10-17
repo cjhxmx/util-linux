@@ -134,7 +134,7 @@ may be also used to skip non-existing device.
 .B "\-f, \-\-fixpgsz"
 Reinitialize (exec /sbin/mkswap) the swap space if its page size does not
 match that of the the current running kernel.
-.B mkswap(2)
+.BR mkswap (2)
 initializes the whole device and does not check for bad blocks.
 .TP
 .B \-h, \-\-help
@@ -150,8 +150,8 @@ is needed.)
 .B "\-p, \-\-priority \fIpriority\fP"
 Specify the priority of the swap device.
 .I priority
-is a value between 0 and 32767. Higher numbers indicate higher
-priority. See
+is a value between \-1 and 32767.  Higher numbers indicate
+higher priority.  See
 .BR swapon (2)
 for a full description of swap priorities. Add
 .BI pri= value
@@ -159,6 +159,7 @@ to the option field of
 .I /etc/fstab
 for use with
 .BR "swapon -a" .
+When priority is not defined it defaults to \-1.
 .TP
 .B "\-s, \-\-summary"
 Display swap usage summary by device. Equivalent to "cat /proc/swaps".

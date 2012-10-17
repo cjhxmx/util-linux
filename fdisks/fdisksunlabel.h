@@ -76,7 +76,6 @@ struct sun_disk_label {
 #define sunlabel ((struct sun_disk_label *)cxt->firstsector)
 
 /* fdisksunlabel.c */
-extern struct systypes sun_sys_types[];
 extern int sun_change_sysid(struct fdisk_context *cxt, int i, uint16_t sys);
 extern void sun_list_table(struct fdisk_context *cxt, int xtra);
 extern void sun_set_alt_cyl(struct fdisk_context *cxt);
@@ -86,6 +85,5 @@ extern void sun_set_ilfact(struct fdisk_context *cxt);
 extern void sun_set_rspeed(struct fdisk_context *cxt);
 extern void sun_set_pcylcount(struct fdisk_context *cxt);
 extern void toggle_sunflags(struct fdisk_context *cxt, int i, uint16_t mask);
-extern int sun_get_sysid(struct fdisk_context *cxt, int i);
 
 #endif /* FDISK_SUN_LABEL_H */

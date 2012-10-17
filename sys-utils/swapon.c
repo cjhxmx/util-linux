@@ -642,6 +642,7 @@ static int swapon_all(void)
 
 static void __attribute__ ((__noreturn__)) usage(FILE * out)
 {
+	size_t i;
 	fputs(USAGE_HEADER, out);
 
 	fprintf(out, _(" %s [options] [<spec>]\n"), program_invocation_short_name);
@@ -674,7 +675,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE * out)
 		" <file>                 name of file to be used\n"), out);
 
 	fputs(_("\nAvailable columns (for --show):\n"), out);
-	for (size_t i = 0; i < NCOLS; i++)
+	for (i = 0; i < NCOLS; i++)
 		fprintf(out, " %4s  %s\n", infos[i].name, _(infos[i].help));
 
 	fprintf(out, USAGE_MAN_TAIL("swapon(8)"));
@@ -730,7 +731,8 @@ int main(int argc, char *argv[])
 			usage(stdout);
 			break;
 		case 'p':		/* priority */
-			priority = atoi(optarg);
+			priority = strtos16_or_err(optarg,
+					   _("failed to parse priority"));
 			break;
 		case 'L':
 			add_label(optarg);

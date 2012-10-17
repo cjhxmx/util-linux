@@ -64,10 +64,9 @@
 static void xbsd_delete_part (struct fdisk_context *cxt, int partnum);
 static void xbsd_edit_disklabel (void);
 static void xbsd_write_bootstrap (struct fdisk_context *cxt);
-static void xbsd_change_fstype (void);
+static void xbsd_change_fstype (struct fdisk_context *cxt);
 static int xbsd_get_part_index (int max);
 static int xbsd_check_new_partition (int *i);
-static void xbsd_list_types (void);
 static unsigned short xbsd_dkcksum (struct xbsd_disklabel *lp);
 static int xbsd_initlabel  (struct fdisk_context *cxt,
 			    struct partition *p, struct xbsd_disklabel *d,
@@ -154,7 +153,7 @@ static int xbsd_write_disklabel (struct fdisk_context *cxt)
 
 static void xbsd_add_part (struct fdisk_context *cxt,
 		int partnum __attribute__((__unused__)),
-		int parttype __attribute__((__unused__)))
+		struct fdisk_parttype *t __attribute__((__unused__)))
 {
 	unsigned int begin, end;
 	char mesg[256];
@@ -275,7 +274,7 @@ bsd_command_prompt (struct fdisk_context *cxt)
 	xbsd_write_bootstrap (cxt);
 	break;
       case 'l':
-	xbsd_list_types ();
+	list_partition_types (cxt);
 	break;
       case 'n':
 	      xbsd_add_part (cxt, 0, 0);
@@ -292,7 +291,7 @@ bsd_command_prompt (struct fdisk_context *cxt)
 	      xbsd_print_disklabel (cxt, 1);
 	break;
       case 't':
-	xbsd_change_fstype ();
+	xbsd_change_fstype (cxt);
 	break;
       case 'u':
 	change_units(cxt);
@@ -559,13 +558,20 @@ xbsd_write_bootstrap (struct fdisk_context *cxt)
   sync_disks ();
 }
 
+/* TODO: remove this, use regular change_partition_type() in fdisk.c */
 static void
-xbsd_change_fstype (void)
+xbsd_change_fstype (struct fdisk_context *cxt)
 {
   int i;
+  struct fdisk_parttype *t;
 
   i = xbsd_get_part_index (xbsd_dlabel.d_npartitions);
-  xbsd_dlabel.d_partitions[i].p_fstype = read_hex (xbsd_fstypes);
+  t = read_partition_type(cxt);
+
+  if (t) {
+    xbsd_dlabel.d_partitions[i].p_fstype = t->type;
+    fdisk_free_parttype(t);
+  }
 }
 
 static int
@@ -610,11 +616,6 @@ xbsd_check_new_partition (int *i) {
 	}
 
 	return 1;
-}
-
-static void
-xbsd_list_types (void) {
-	list_types (xbsd_fstypes);
 }
 
 static unsigned short
@@ -843,13 +844,47 @@ alpha_bootblock_checksum (char *boot)
 }
 #endif /* __alpha__ */
 
+static struct fdisk_parttype *xbsd_get_parttype(struct fdisk_context *cxt, int n)
+{
+	struct fdisk_parttype *t;
+
+	if (n >= xbsd_dlabel.d_npartitions)
+		return NULL;
+
+	t = fdisk_get_parttype_from_code(cxt, xbsd_dlabel.d_partitions[n].p_fstype);
+	if (!t)
+		t = fdisk_new_unknown_parttype(xbsd_dlabel.d_partitions[n].p_fstype, NULL);
+	return t;
+}
+
+static int xbsd_set_parttype(struct fdisk_context *cxt, int partnum,
+			    struct fdisk_parttype *t)
+{
+	struct xbsd_partition *p;
+
+	if (partnum >= xbsd_dlabel.d_npartitions || !t || t->type > UINT8_MAX)
+		return -EINVAL;
+
+	p = &xbsd_dlabel.d_partitions[partnum];
+	if (t->type == p->p_fstype)
+		return 0;
+
+	p->p_fstype = t->type;
+	return 0;
+}
+
 const struct fdisk_label bsd_label =
 {
 	.name = "bsd",
+	.parttypes = xbsd_fstypes,
+	.nparttypes = ARRAY_SIZE(xbsd_fstypes),
+
 	.probe = osf_probe_label,
 	.write = xbsd_write_disklabel,
 	.verify = NULL,
 	.create = xbsd_create_disklabel,
 	.part_add = xbsd_add_part,
 	.part_delete = xbsd_delete_part,
+	.part_get_type = xbsd_get_parttype,
+	.part_set_type = xbsd_set_parttype,
 };

@@ -48,6 +48,7 @@
 
 #if defined (__i386__) || defined (__sparc__) || defined (__arm__) || \
     defined (__mips__) || defined (__s390__) || defined (__sh__) || \
+    defined (__aarch64__) || \
     defined(__x86_64__) || defined (__avr32__) || defined(__cris__)
 #define BSD_LABELSECTOR   1
 #define BSD_LABELOFFSET   0
@@ -200,7 +201,7 @@ static char *xbsd_dktypenames[] = {
 #endif
 
 #ifdef	DKTYPENAMES
-static struct systypes xbsd_fstypes[] = {
+static struct fdisk_parttype xbsd_fstypes[] = {
         {BSD_FS_UNUSED, "unused"},
 	{BSD_FS_SWAP,   "swap"},
 	{BSD_FS_V6,     "Version 6"},

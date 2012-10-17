@@ -100,6 +100,27 @@ enum failure {
 typedef unsigned long long sector_t;
 
 /*
+ * Partition types
+ */
+struct fdisk_parttype {
+	unsigned int	type;		/* type as number or zero */
+	const char	*name;		/* description */
+	char		*typestr;	/* type as string or NULL */
+
+	unsigned int	flags;		/* FDISK_PARTTYPE_* flags */
+};
+
+enum {
+	FDISK_PARTTYPE_UNKNOWN		= (1 << 1),
+	FDISK_PARTTYPE_INVISIBLE	= (1 << 2),
+	FDISK_PARTTYPE_ALLOCATED	= (1 << 3)
+};
+
+#define fdisk_parttype_is_unknown(_x)	((_x) && ((_x)->flags & FDISK_PARTTYPE_UNKNONW))
+#define fdisk_parttype_is_invisible(_x)	((_x) && ((_x)->flags & FDISK_PARTTYPE_INVISIBLE))
+#define fdisk_parttype_is_allocated(_x)	((_x) && ((_x)->flags & FDISK_PARTTYPE_ALLOCATED))
+
+/*
  * Legacy CHS based geometry
  */
 struct fdisk_geometry {
@@ -137,6 +158,10 @@ struct fdisk_context {
 struct fdisk_label {
 	const char *name;
 
+	/* array with partition types */
+	struct fdisk_parttype	*parttypes;
+	size_t			nparttypes;	/* number of items in parttypes[] */
+
 	/* probe disk label */
 	int (*probe)(struct fdisk_context *cxt);
 	/* write in-memory changes to disk */
@@ -146,9 +171,13 @@ struct fdisk_label {
 	/* create new disk label */
 	int (*create)(struct fdisk_context *cxt);
 	/* new partition */
-	void (*part_add)(struct fdisk_context *cxt, int partnum, int parttype);
+	void (*part_add)(struct fdisk_context *cxt, int partnum, struct fdisk_parttype *t);
 	/* delete partition */
 	void (*part_delete)(struct fdisk_context *cxt, int partnum);
+	/* get partition type */
+	struct fdisk_parttype *(*part_get_type)(struct fdisk_context *cxt, int partnum);
+	/* set partition type */
+	int (*part_set_type)(struct fdisk_context *cxt, int partnum, struct fdisk_parttype *t);
 };
 
 /*
@@ -160,6 +189,7 @@ extern const struct fdisk_label bsd_label;
 extern const struct fdisk_label mac_label;
 extern const struct fdisk_label sun_label;
 extern const struct fdisk_label sgi_label;
+extern const struct fdisk_label gpt_label;
 
 extern struct fdisk_context *fdisk_new_context_from_filename(const char *fname, int readonly);
 extern int fdisk_dev_has_topology(struct fdisk_context *cxt);
@@ -172,10 +202,23 @@ extern int fdisk_context_set_user_geometry(struct fdisk_context *cxt,
 			    unsigned int cylinders, unsigned int heads,
 			    unsigned int sectors);
 extern int fdisk_delete_partition(struct fdisk_context *cxt, int partnum);
-extern int fdisk_add_partition(struct fdisk_context *cxt, int partnum, int parttype);
+extern int fdisk_add_partition(struct fdisk_context *cxt, int partnum, struct fdisk_parttype *t);
 extern int fdisk_write_disklabel(struct fdisk_context *cxt);
 extern int fdisk_verify_disklabel(struct fdisk_context *cxt);
 extern int fdisk_create_disklabel(struct fdisk_context *cxt, const char *name);
+extern struct fdisk_parttype *fdisk_get_partition_type(struct fdisk_context *cxt, int partnum);
+extern int fdisk_set_partition_type(struct fdisk_context *cxt, int partnum,
+			     struct fdisk_parttype *t);
+
+extern size_t fdisk_get_nparttypes(struct fdisk_context *cxt);
+extern struct fdisk_parttype *fdisk_get_parttype_from_code(struct fdisk_context *cxt,
+                                unsigned int code);
+extern struct fdisk_parttype *fdisk_get_parttype_from_string(struct fdisk_context *cxt,
+                                const char *str);
+extern struct fdisk_parttype *fdisk_parse_parttype(struct fdisk_context *cxt, const char *str);
+
+extern struct fdisk_parttype *fdisk_new_unknown_parttype(unsigned int type, const char *typestr);
+extern void fdisk_free_parttype(struct fdisk_parttype *type);
 
 /* prototypes for fdisk.c */
 extern char *line_ptr;
@@ -189,10 +232,10 @@ extern void check(struct fdisk_context *cxt, int n, unsigned int h, unsigned int
 extern void change_units(struct fdisk_context *cxt);
 extern void fatal(struct fdisk_context *cxt, enum failure why);
 extern int  get_partition(struct fdisk_context *cxt, int warn, int max);
-extern void list_types(struct systypes *sys);
+extern void list_partition_types(struct fdisk_context *cxt);
 extern int read_line (int *asked);
 extern char read_char(char *mesg);
-extern int read_hex(struct systypes *sys);
+extern struct fdisk_parttype *read_partition_type(struct fdisk_context *cxt);
 extern void reread_partition_table(struct fdisk_context *cxt, int leave);
 extern struct partition *get_part_table(int);
 extern unsigned int read_int(struct fdisk_context *cxt,
@@ -203,7 +246,7 @@ extern void print_partition_size(struct fdisk_context *cxt, int num, sector_t st
 
 extern void fill_bounds(sector_t *first, sector_t *last);
 
-extern char *partition_type(unsigned char type);
+extern char *partition_type(struct fdisk_context *cxt, unsigned char type);
 extern void update_units(struct fdisk_context *cxt);
 extern char read_chars(char *mesg);
 extern void set_changed(int);
@@ -234,6 +277,7 @@ enum fdisk_labeltype {
 	AIX_LABEL = 8,
 	OSF_LABEL = 16,
 	MAC_LABEL = 32,
+	GPT_LABEL = 64,
 	ANY_LABEL = -1
 };
 

@@ -38,6 +38,20 @@
 # define UMOUNT_UNUSED    0x80000000	/* Flag guaranteed to be unused */
 #endif
 
+/*
+ * Called by mtab parser to filter out entries, nonzero means that
+ * entry has to be filter out.
+ */
+static int mtab_filter(struct libmnt_fs *fs, void *data)
+{
+	if (!fs || !data)
+		return 0;
+	if (mnt_fs_streq_target(fs, data))
+		return 0;
+	if (mnt_fs_streq_srcpath(fs, data))
+		return 0;
+	return 1;
+}
 
 static int lookup_umount_fs(struct libmnt_context *cxt)
 {
@@ -45,6 +59,8 @@ static int lookup_umount_fs(struct libmnt_context *cxt)
 	const char *tgt;
 	struct libmnt_table *mtab = NULL;
 	struct libmnt_fs *fs;
+	struct libmnt_cache *cache = NULL;
+	char *cn_tgt = NULL;
 
 	assert(cxt);
 	assert(cxt->fs);
@@ -56,7 +72,38 @@ static int lookup_umount_fs(struct libmnt_context *cxt)
 		DBG(CXT, mnt_debug_h(cxt, "umount: undefined target"));
 		return -EINVAL;
 	}
+
+	/*
+	 * The mtab file maybe huge and on systems with utab we have to merge
+	 * userspace mount options into /proc/self/mountinfo. This all is
+	 * expensive. The mtab filter allows to filter out entries, then
+	 * mtab and utab are very tiny files.
+	 *
+	 * *but*... the filter uses mnt_fs_streq_{target,srcpath} functions
+	 * where LABEL, UUID or symlinks are to canonicalized. It means that
+	 * it's usable only for canonicalized stuff (e.g. kernel mountinfo).
+	 */
+	if (!cxt->mtab_writable	&& *tgt == '/' &&
+	    !mnt_context_is_force(cxt) && !mnt_context_is_lazy(cxt)) {
+
+		struct stat st;
+
+		if (stat(tgt, &st) == 0 && S_ISDIR(st.st_mode)) {
+			/* we'll canonicalized /proc/self/mountinfo */
+			cache = mnt_context_get_cache(cxt);
+			cn_tgt = mnt_resolve_path(tgt, cache);
+			if (cn_tgt)
+				mnt_context_set_tabfilter(cxt, mtab_filter, cn_tgt);
+		}
+	}
 	rc = mnt_context_get_mtab(cxt, &mtab);
+
+	if (cn_tgt) {
+		mnt_context_set_tabfilter(cxt, NULL, NULL);
+		if (!cache)
+			free(cn_tgt);
+	}
+
 	if (rc) {
 		DBG(CXT, mnt_debug_h(cxt, "umount: failed to read mtab"));
 		return rc;
@@ -112,7 +159,7 @@ try_loopdev:
 			} else if (count > 1)
 				DBG(CXT, mnt_debug_h(cxt,
 					"umount: warning: %s is associated "
-					"with more than one loodev", tgt));
+					"with more than one loopdev", tgt));
 		}
 	}
 
@@ -497,7 +544,7 @@ static int do_umount(struct libmnt_context *cxt)
 
 	if (cxt->restricted && !mnt_context_is_fake(cxt)) {
 		/*
-		 * extra paranoa for non-root users
+		 * extra paranoia for non-root users
 		 * -- chdir to the parent of the mountpoint and use NOFOLLOW
 		 *    flag to avoid races and symlink attacks.
 		 */

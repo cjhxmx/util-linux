@@ -50,12 +50,20 @@
 #include "linux_version.h"
 #include "common.h"
 #include "wholedisk.h"
-#include "gpt.h"
 #include "pathnames.h"
 #include "canonicalize.h"
 #include "rpmatch.h"
 #include "closestream.h"
 #include "strutils.h"
+
+struct systypes {
+	unsigned char type;
+	char *name;
+};
+
+static struct systypes i386_sys_types[] = {
+	#include "dos_part_types.h"
+};
 
 /*
  * Table of contents:
@@ -597,7 +605,7 @@ chs_ok(chs a, char *v, char *w) {
 #define BSD_PARTITION		0xa5
 #define NETBSD_PARTITION	0xa9
 
-/* List of partition types now in i386_sys_types.c */
+/* List of partition types */
 
 static const char *
 sysname(unsigned char type) {
@@ -1553,12 +1561,14 @@ msdos_partition(char *dev, int fd, unsigned long start, struct disk_desc *z) {
 	return 0;
     }
 
-    unsigned int sig = *(unsigned short *)(s->data + 2);
-    if (sig <= 0x1ae
-	&& *(unsigned short *)(s->data + sig) == 0x55aa
-	&& (1 & *(unsigned char *)(s->data + sig + 2))) {
+    unsigned short sig, magic;
+    memcpy(&sig, s->data + 2, sizeof(sig));
+    if (sig <= 0x1ae) {
+	memcpy(&magic, s->data + sig, sizeof(magic));
+	if (magic == 0x55aa && (1 & *(unsigned char *)(s->data + sig + 2))) {
 	    warnx(_("DM6 signature found - giving up\n"));
 	    return 0;
+	}
     }
 
     for (pno = 0; pno < 4; pno++, cp += sizeof(struct partition)) {
@@ -2528,25 +2538,6 @@ nextproc(FILE * procf) {
     return NULL;
 }
 
-static void
-gpt_warning(char *dev, int warn_only) {
-    if (force)
-	warn_only = 1;
-
-    if (dev && gpt_probe_signature_devname(dev)) {
-	fflush(stdout);
-	fprintf(stderr,
-		_("\nWARNING: GPT (GUID Partition Table) detected on '%s'! "
-		  "The util sfdisk doesn't support GPT. Use GNU Parted.\n\n"),
-		dev);
-	if (!warn_only) {
-	    fprintf(stderr,
-		    _("Use the --force flag to overrule this check.\n"));
-	    exit(1);
-	}
-    }
-}
-
 static void do_list(char *dev, int silent);
 static void do_size(char *dev, int silent);
 static void do_geom(char *dev, int silent);
@@ -2735,7 +2726,6 @@ main(int argc, char **argv) {
 	else {
 	    while ((dev = nextproc(procf)) != NULL) {
 		if (!is_ide_cdrom_or_tape(dev)) {
-		    gpt_warning(dev, 1);
 		    if (opt_out_geom)
 			do_geom(dev, 1);
 		    if (opt_out_pt_geom)
@@ -2767,7 +2757,6 @@ main(int argc, char **argv) {
 
     if (opt_list || opt_out_geom || opt_out_pt_geom || opt_size || verify) {
 	while (optind < argc) {
-	    gpt_warning(argv[optind], 1);
 	    if (opt_out_geom)
 		do_geom(argv[optind], 0);
 	    if (opt_out_pt_geom)
@@ -2780,9 +2769,6 @@ main(int argc, char **argv) {
 	}
 	exit(exit_status);
     }
-
-    if (optind != argc - 1)
-	gpt_warning(argv[optind], 0);
 
     if (activate) {
 	do_activate(argv + optind, argc - optind, activatearg);

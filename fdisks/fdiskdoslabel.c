@@ -13,6 +13,10 @@
 #include "fdisk.h"
 #include "fdiskdoslabel.h"
 
+static struct fdisk_parttype dos_parttypes[] = {
+	#include "dos_part_types.h"
+};
+
 #define set_hsc(h,s,c,sector) { \
 		s = sector % cxt->geom.sectors + 1;			\
 		sector /= cxt->geom.sectors;				\
@@ -410,7 +414,7 @@ static int dos_probe_label(struct fdisk_context *cxt)
  * We might also do the opposite and warn in all cases except
  * for "is probably nondos partition".
  */
-int is_dos_partition(int t)
+static int is_dos_partition(int t)
 {
 	return (t == 1 || t == 4 || t == 6 ||
 		t == 0x0b || t == 0x0c || t == 0x0e ||
@@ -483,14 +487,16 @@ static sector_t align_lba_in_range(struct fdisk_context *cxt,
 	return lba;
 }
 
-static void add_partition(struct fdisk_context *cxt, int n, int sys)
+static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttype *t)
 {
 	char mesg[256];		/* 48 does not suffice in Japanese */
-	int i, read = 0;
+	int i, sys, read = 0;
 	struct partition *p = ptes[n].part_table;
 	struct partition *q = ptes[ext_index].part_table;
 	sector_t start, stop = 0, limit, temp,
 		first[partitions], last[partitions];
+
+	sys = t ? t->type : LINUX_NATIVE;
 
 	if (p && p->sys_ind) {
 		printf(_("Partition %d is already defined.  Delete "
@@ -642,7 +648,7 @@ static void add_logical(struct fdisk_context *cxt)
 		partitions++;
 	}
 	printf(_("Adding logical partition %d\n"), partitions);
-	add_partition(cxt, partitions - 1, LINUX_NATIVE);
+	add_partition(cxt, partitions - 1, NULL);
 }
 
 static int dos_verify_disklabel(struct fdisk_context *cxt)
@@ -718,12 +724,9 @@ static int dos_verify_disklabel(struct fdisk_context *cxt)
 static void dos_add_partition(
 			struct fdisk_context *cxt,
 			int partnum __attribute__ ((__unused__)),
-			int parttype)
+			struct fdisk_parttype *t)
 {
 	int i, free_primary = 0;
-
-	/* default */
-	parttype = LINUX_NATIVE;
 
 	for (i = 0; i < 4; i++)
 		free_primary += !ptes[i].part_table->sys_ind;
@@ -743,7 +746,7 @@ static void dos_add_partition(
 	} else if (partitions >= MAXIMUM_PARTS) {
 		printf(_("All logical partitions are in use\n"));
 		printf(_("Adding a primary partition\n"));
-		add_partition(cxt, get_partition(cxt, 0, 4), parttype);
+		add_partition(cxt, get_partition(cxt, 0, 4), t);
 	} else {
 		char c, dflt, line[LINE_LENGTH];
 
@@ -765,15 +768,17 @@ static void dos_add_partition(
 		if (c == 'p') {
 			int i = get_nonexisting_partition(cxt, 0, 4);
 			if (i >= 0)
-				add_partition(cxt, i, parttype);
+				add_partition(cxt, i, t);
 			return;
 		} else if (c == 'l' && extended_offset) {
 			add_logical(cxt);
 			return;
 		} else if (c == 'e' && !extended_offset) {
 			int i = get_nonexisting_partition(cxt, 0, 4);
-			if (i >= 0)
-				add_partition(cxt, i, EXTENDED);
+			if (i >= 0) {
+				t = fdisk_get_parttype_from_code(cxt, EXTENDED);
+				add_partition(cxt, i, t);
+			}
 			return;
 		} else
 			printf(_("Invalid partition type `%c'\n"), c);
@@ -821,13 +826,61 @@ done:
 	return rc;
 }
 
+static struct fdisk_parttype *dos_get_parttype(struct fdisk_context *cxt, int partnum)
+{
+	struct fdisk_parttype *t;
+	struct partition *p;
+
+	if (partnum >= partitions)
+		return NULL;
+
+	p = ptes[partnum].part_table;
+	t = fdisk_get_parttype_from_code(cxt, p->sys_ind);
+	if (!t)
+		t = fdisk_new_unknown_parttype(p->sys_ind, NULL);
+	return t;
+}
+
+static int dos_set_parttype(struct fdisk_context *cxt, int partnum,
+			    struct fdisk_parttype *t)
+{
+	struct partition *p;
+
+	if (partnum >= partitions || !t || t->type > UINT8_MAX)
+		return -EINVAL;
+
+	p = ptes[partnum].part_table;
+	if (t->type == p->sys_ind)
+		return 0;
+
+	if (IS_EXTENDED(p->sys_ind) || IS_EXTENDED(t->type)) {
+		printf(_("\nYou cannot change a partition into an extended one "
+			 "or vice versa.\nDelete it first.\n\n"));
+		return -EINVAL;
+	}
+
+	if (is_dos_partition(t->type) || is_dos_partition(p->sys_ind))
+	    printf(
+		_("\nWARNING: If you have created or modified any DOS 6.x"
+		"partitions, please see the fdisk manual page for additional"
+		"information.\n\n"));
+
+	p->sys_ind = t->type;
+	return 0;
+}
+
 const struct fdisk_label dos_label =
 {
 	.name = "dos",
+	.parttypes = dos_parttypes,
+	.nparttypes = ARRAY_SIZE(dos_parttypes),
+
 	.probe = dos_probe_label,
 	.write = dos_write_disklabel,
 	.verify = dos_verify_disklabel,
 	.create = dos_create_disklabel,
 	.part_add = dos_add_partition,
 	.part_delete = dos_delete_partition,
+	.part_get_type = dos_get_parttype,
+	.part_set_type = dos_set_parttype,
 };

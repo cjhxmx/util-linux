@@ -103,9 +103,17 @@
 #include "blkdev.h"
 #include "strutils.h"
 #include "common.h"
-#include "gpt.h"
 #include "mbsalign.h"
 #include "widechar.h"
+
+struct systypes {
+	unsigned char type;
+	char *name;
+};
+
+static struct systypes i386_sys_types[] = {
+	#include "dos_part_types.h"
+};
 
 #ifdef __GNU__
 #define DEFAULT_DEVICE "/dev/hd0"
@@ -1500,13 +1508,6 @@ fill_p_info(void) {
     } else
 	 opentype = O_RDWR;
     opened = TRUE;
-
-    if (gpt_probe_signature_fd(fd)) {
-	 print_warning(_("Warning!!  Unsupported GPT (GUID Partition Table) detected. Use GNU Parted."));
-	 refresh();
-	 getch();
-	 clear_warning();
-    }
 
 #ifdef BLKFLSBUF
     /* Blocks are visible in more than one way:

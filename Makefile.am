@@ -39,7 +39,6 @@ bin_PROGRAMS =
 sbin_PROGRAMS =
 dist_usrbin_exec_SCRIPTS =
 systemdsystemunit_DATA =
-ruman1_DATA =
 check_PROGRAMS =
 TESTS =
 
@@ -51,7 +50,7 @@ INSTALL_DATA_HOOKS =
 CLEAN_LOCALS =
 CHECK_LOCALS =
 
-EXTRA_DIST = man/ru/ddate.1
+EXTRA_DIST =
 CLEANFILES =
 
 SUBDIRS = po
@@ -155,7 +154,7 @@ checkdecl:
 	@ $(top_srcdir)/tools/checkdecl.sh
 
 ENABLE_ALL = --enable-static-programs --enable-most-builds
-DISTCHECK_CONFIGURE_FLAGS = --enable-gtk-doc --disable-use-tty-group \
+DISTCHECK_CONFIGURE_FLAGS = --disable-use-tty-group \
 			    --disable-silent-rules $(ENABLE_ALL) \
 			    --with-systemdsystemunitdir=$$dc_install_base/$(systemdsystemunitdir)
 

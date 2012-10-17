@@ -23,6 +23,7 @@
 #include <fcntl.h>
 
 #include "c.h"
+#include "colors.h"
 #include "nls.h"
 #include "strutils.h"
 #include "xalloc.h"
@@ -147,7 +148,8 @@ struct dmesg_control {
 			notime:1,	/* don't print timestamp */
 			delta:1,	/* show time deltas */
 			reltime:1,	/* show human readable relative times */
-			ctime:1;	/* show human readable time */
+			ctime:1,	/* show human readable time */
+			color:1;	/* colorize messages */
 };
 
 struct dmesg_record {
@@ -173,6 +175,24 @@ struct dmesg_record {
 
 static int read_kmsg(struct dmesg_control *ctl);
 
+static int set_level_color(int log_level)
+{
+	switch (log_level) {
+	case LOG_ALERT:
+		color_enable(UL_COLOR_BOLD_RED);
+		return 0;
+	case LOG_CRIT:
+		color_enable(UL_COLOR_RED);
+		return 0;
+	case LOG_ERR:
+		color_enable(UL_COLOR_BOLD);
+		return 0;
+	default:
+		break;
+	}
+
+	return 1;
+}
 
 static void __attribute__((__noreturn__)) usage(FILE *out)
 {
@@ -193,6 +213,7 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 		" -f, --facility <list>       restrict output to defined facilities\n"
 		" -h, --help                  display this help and exit\n"
 		" -k, --kernel                display kernel messages\n"
+		" -L, --color                 colorize messages\n"
 		" -l, --level <list>          restrict output to defined levels\n"
 		" -n, --console-level <level> set level of messages printed to console\n"
 		" -r, --raw                   print the raw message buffer\n"
@@ -227,24 +248,36 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 
 /*
  * LEVEL     ::= <number> | <name>
- *  <number> ::= number in range <0..N>, where N < ARRAY_SIZE(level_names)
+ *  <number> ::= @len is set:  number in range <0..N>, where N < ARRAY_SIZE(level_names)
+ *           ::= @len not set: number in range <1..N>, where N <= ARRAY_SIZE(level_names)
  *  <name>   ::= case-insensitive text
+ *
+ *  Note that @len argument is not set when parsing "-n <level>" command line
+ *  option. The console_level is intepreted as "log level less than the value".
+ *
+ *  For example "dmesg -n 8" or "dmesg -n debug" enables debug console log
+ *  level by klogctl(SYSLOG_ACTION_CONSOLE_LEVEL, NULL, 8). The @str argument
+ *  has to be parsed to number in range <1..8>.
  */
 static int parse_level(const char *str, size_t len)
 {
+	int offset = 0;
+
 	if (!str)
 		return -1;
-	if (!len)
+	if (!len) {
 		len = strlen(str);
+		offset = 1;
+	}
 	errno = 0;
 
 	if (isdigit(*str)) {
 		char *end = NULL;
-		long x = strtol(str, &end, 10);
+		long x = strtol(str, &end, 10) - offset;
 
 		if (!errno && end && end > str && (size_t) (end - str) == len &&
 		    x >= 0 && (size_t) x < ARRAY_SIZE(level_names))
-			return x;
+			return x + offset;
 	} else {
 		size_t i;
 
@@ -252,7 +285,7 @@ static int parse_level(const char *str, size_t len)
 			const char *n = level_names[i].name;
 
 			if (strncasecmp(str, n, len) == 0 && *(n + len) == '\0')
-				return i;
+				return i + offset;
 		}
 	}
 
@@ -744,6 +777,7 @@ static void print_record(struct dmesg_control *ctl,
 			 struct dmesg_record *rec)
 {
 	char buf[256];
+	int has_color = 0;
 
 	if (!accept_record(ctl, rec))
 		return;
@@ -827,7 +861,14 @@ static void print_record(struct dmesg_control *ctl,
 		printf("[%5d.%06d] ", (int) rec->tv.tv_sec, (int) rec->tv.tv_usec);
 
 mesg:
+	/* Change the output color for panic and error messages */
+	if (ctl->color)
+		has_color = set_level_color(rec->level) == 0;
+
 	safe_fwrite(rec->mesg, rec->mesg_size, stdout);
+
+	if (has_color)
+		color_disable();
 
 	if (*(rec->mesg + rec->mesg_size - 1) != '\n')
 		putchar('\n');
@@ -930,7 +971,8 @@ static int parse_kmsg_record(struct dmesg_control *ctl,
 		p++;
 
 	/* A) priority and facility */
-	if (ctl->fltr_lev || ctl->fltr_fac || ctl->decode || ctl->raw)
+	if (ctl->fltr_lev || ctl->fltr_fac || ctl->decode ||
+	    ctl->raw || ctl->color)
 		p = parse_faclev(p, &rec->facility, &rec->level);
 	else
 		p = skip_item(p, end, ",");
@@ -1034,6 +1076,7 @@ int main(int argc, char *argv[])
 	static const struct option longopts[] = {
 		{ "buffer-size",   required_argument, NULL, 's' },
 		{ "clear",         no_argument,	      NULL, 'C' },
+		{ "color",         no_argument,	      NULL, 'L' },
 		{ "console-level", required_argument, NULL, 'n' },
 		{ "console-off",   no_argument,       NULL, 'D' },
 		{ "console-on",    no_argument,       NULL, 'E' },
@@ -1068,7 +1111,7 @@ int main(int argc, char *argv[])
 	textdomain(PACKAGE);
 	atexit(close_stdout);
 
-	while ((c = getopt_long(argc, argv, "CcDdEeF:f:hkl:n:rSs:TtuVwx",
+	while ((c = getopt_long(argc, argv, "CcDdEeF:f:hkLl:n:rSs:TtuVwx",
 				longopts, NULL)) != -1) {
 
 		err_exclusive_options(c, longopts, excl, excl_st);
@@ -1110,6 +1153,10 @@ int main(int argc, char *argv[])
 		case 'k':
 			ctl.fltr_fac = 1;
 			setbit(ctl.facilities, FAC_BASE(LOG_KERN));
+			break;
+		case 'L':
+			if (colors_init())
+				ctl.color = 1;
 			break;
 		case 'l':
 			ctl.fltr_lev= 1;

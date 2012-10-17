@@ -87,7 +87,7 @@ isinfreelist(unsigned int b) {
 /*
  * end of free blocks section
  */
-struct systypes sgi_sys_types[] = {
+static struct fdisk_parttype sgi_parttypes[] = {
 	{SGI_VOLHDR,	N_("SGI volhdr")},
 	{0x01,		N_("SGI trkrepl")},
 	{0x02,		N_("SGI secrepl")},
@@ -164,7 +164,6 @@ void
 sgi_list_table(struct fdisk_context *cxt, int xtra) {
 	int i, w;
 	int kpi = 0;		/* kernel partition ID */
-	char *type;
 
 	w = strlen(cxt->dev_path);
 
@@ -195,6 +194,8 @@ sgi_list_table(struct fdisk_context *cxt, int xtra) {
 		if (sgi_get_num_sectors(cxt, i) || debug) {
 			uint32_t start = sgi_get_start_sector(cxt, i);
 			uint32_t len = sgi_get_num_sectors(cxt, i);
+			struct fdisk_parttype *t = fdisk_get_partition_type(cxt, i);
+
 			kpi++;		/* only count nonempty partitions */
 			printf(
 				"%2d: %s %4s %9ld %9ld %9ld  %2x  %s\n",
@@ -205,9 +206,10 @@ sgi_list_table(struct fdisk_context *cxt, int xtra) {
 /* start */               (long) scround(start),
 /* end */                 (long) scround(start+len)-1,
 /* no odd flag on end */  (long) len,
-/* type id */             sgi_get_sysid(cxt, i),
-/* type name */           (type = partition_type(sgi_get_sysid(cxt, i)))
-				? type : _("Unknown"));
+/* type id */             t->type,
+/* type name */           t->name);
+
+			fdisk_free_parttype(t);
 		}
 	}
 	printf(_("----- Bootinfo -----\nBootfile: %s\n"
@@ -235,7 +237,7 @@ sgi_get_num_sectors(struct fdisk_context *cxt, int i) {
 	return SSWAP32(sgilabel->partitions[i].num_sectors);
 }
 
-int
+static int
 sgi_get_sysid(struct fdisk_context *cxt, int i)
 {
 	return SSWAP32(sgilabel->partitions[i].id);
@@ -573,27 +575,6 @@ sgi_gaps(struct fdisk_context *cxt) {
 	return sgi_verify_disklabel(cxt);
 }
 
-int
-sgi_change_sysid(struct fdisk_context *cxt, int i, int sys)
-{
-	if (sgi_get_num_sectors(cxt, i) == 0) /* caught already before, ... */ {
-		printf(_("Sorry, only for non-empty partitions you can change the tag.\n"));
-		return 0;
-	}
-	if (((sys != ENTIRE_DISK) && (sys != SGI_VOLHDR))
-	    && (sgi_get_start_sector(cxt, i)<1)) {
-		read_chars(
-			_("It is highly recommended that the partition at offset 0\n"
-			  "is of type \"SGI volhdr\", the IRIX system will rely on it to\n"
-			  "retrieve from its directory standalone tools like sash and fx.\n"
-			  "Only the \"SGI volume\" entire disk section may violate this.\n"
-			  "Type YES if you are sure about tagging this partition differently.\n"));
-		if (strcmp (line_ptr, _("YES\n")))
-			return 0;
-	}
-	sgilabel->partitions[i].id = SSWAP32(sys);
-	return 1;
-}
 
 /* returns partition index of first entry marked as entire disk */
 static int
@@ -655,16 +636,18 @@ static void sgi_delete_partition(struct fdisk_context *cxt, int partnum)
 	sgi_set_partition(cxt, partnum, 0, 0, 0);
 }
 
-static void sgi_add_partition(struct fdisk_context *cxt, int n, int sys)
+static void sgi_add_partition(struct fdisk_context *cxt, int n,
+			      struct fdisk_parttype *t)
 {
 	char mesg[256];
 	unsigned int first=0, last=0;
+	int sys = t ? t->type : SGI_XFS;
 
-	if (n == 10) {
+	if (n == 10)
 		sys = SGI_VOLUME;
-	} else if (n == 8) {
+	else if (n == 8)
 		sys = 0;
-	}
+
 	if (sgi_get_num_sectors(cxt, n)) {
 		printf(_("Partition %d is already defined.  Delete "
 			 "it before re-adding it.\n"), n + 1);
@@ -895,13 +878,62 @@ static sgiinfo *fill_sgiinfo(void)
 	return info;
 }
 
+static struct fdisk_parttype *sgi_get_parttype(struct fdisk_context *cxt, int n)
+{
+	struct fdisk_parttype *t;
+
+	if (n >= partitions)
+		return NULL;
+
+	t = fdisk_get_parttype_from_code(cxt, sgi_get_sysid(cxt, n));
+	if (!t)
+		t = fdisk_new_unknown_parttype(sgi_get_sysid(cxt, n), NULL);
+	return t;
+}
+
+static int sgi_set_parttype(struct fdisk_context *cxt, int i,
+			    struct fdisk_parttype *t)
+{
+	if (i >= partitions || !t || t->type > UINT32_MAX)
+		return -EINVAL;
+
+	if (sgi_get_num_sectors(cxt, i) == 0)	/* caught already before, ... */ {
+		printf(_("Sorry, only for non-empty partitions you can change the tag.\n"));
+		return -EINVAL;
+	}
+
+	if ((i == 10 && t->type != ENTIRE_DISK) || (i == 8 && t->type != 0))
+		printf(_("Consider leaving partition 9 as volume header (0), "
+			 "and partition 11 as entire volume (6), as IRIX "
+			 "expects it.\n\n"));
+
+	if (((t->type != ENTIRE_DISK) && (t->type != SGI_VOLHDR))
+	    && (sgi_get_start_sector(cxt, i) < 1)) {
+		read_chars(
+			_("It is highly recommended that the partition at offset 0\n"
+			  "is of type \"SGI volhdr\", the IRIX system will rely on it to\n"
+			  "retrieve from its directory standalone tools like sash and fx.\n"
+			  "Only the \"SGI volume\" entire disk section may violate this.\n"
+			  "Type YES if you are sure about tagging this partition differently.\n"));
+		if (strcmp (line_ptr, _("YES\n")))
+			return 1;
+	}
+	sgilabel->partitions[i].id = SSWAP32(t->type);
+	return 0;
+}
+
 const struct fdisk_label sgi_label =
 {
 	.name = "sgi",
+	.parttypes = sgi_parttypes,
+	.nparttypes = ARRAY_SIZE(sgi_parttypes),
+
 	.probe = sgi_probe_label,
 	.write = sgi_write_disklabel,
 	.verify = sgi_verify_disklabel,
 	.create = sgi_create_disklabel,
 	.part_add = sgi_add_partition,
 	.part_delete = sgi_delete_partition,
+	.part_get_type = sgi_get_parttype,
+	.part_set_type = sgi_set_parttype,
 };
