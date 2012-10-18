@@ -1223,19 +1223,21 @@ static int gpt_verify_disklabel(struct fdisk_context *cxt)
 }
 
 /* Delete a single GPT partition, specified by partnum. */
-static void gpt_delete_partition(struct fdisk_context *cxt, int partnum)
+static int gpt_delete_partition(struct fdisk_context *cxt, int partnum)
 {
 	if (!cxt || partition_unused(ents[partnum]) || partnum < 0)
-		return;
+		return -EINVAL;
 
 	/* hasta la vista, baby! */
 	memset(&ents[partnum], 0, sizeof(ents[partnum]));
 	if (!partition_unused(ents[partnum]))
-		printf(_("Could not delete partition %d\n"), partnum + 1);
+		return -EINVAL;
 	else {
 		gpt_recompute_crc(pheader, ents);
 		gpt_recompute_crc(bheader, ents);
 	}
+
+	return 0;
 }
 
 static void gpt_entry_set_type(struct gpt_entry *e, struct gpt_guid *type)
@@ -1293,17 +1295,7 @@ static int gpt_create_new_partition(int partnum, uint64_t fsect, uint64_t lsect,
 	 * to have a unique GUID.
 	 */
 	uuid_generate_random((unsigned char *) &e->unique_partition_guid);
-
-	/*
-	 * UUID is traditionally 16 byte big-endian array, except Intel EFI
-	 * specs where the UUID is a structure of little-endian fields, convert.
-	 */
-	e->unique_partition_guid.time_low =
-		cpu_to_le32(e->unique_partition_guid.time_low);
-	e->unique_partition_guid.time_mid =
-		cpu_to_le16(e->unique_partition_guid.time_mid);
-	e->unique_partition_guid.time_hi_and_version =
-		cpu_to_le16(e->unique_partition_guid.time_hi_and_version);
+	swap_efi_guid(&e->unique_partition_guid);
 
 	memcpy(&entries[partnum] , e, sizeof(*e));
 

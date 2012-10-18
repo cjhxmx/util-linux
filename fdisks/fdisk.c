@@ -841,8 +841,10 @@ static void delete_partition(struct fdisk_context *cxt, int partnum)
 		return;
 
 	ptes[partnum].changed = 1;
-	fdisk_delete_partition(cxt, partnum);
-	printf(_("Partition %d is deleted\n"), partnum + 1);
+	if (fdisk_delete_partition(cxt, partnum) != 0)
+		printf(_("Could not delete partition %d\n"), partnum + 1);
+	else
+		printf(_("Partition %d is deleted\n"), partnum + 1);
 }
 
 static void change_partition_type(struct fdisk_context *cxt)
@@ -1387,7 +1389,8 @@ static void print_raw(struct fdisk_context *cxt)
 	int i;
 
 	printf(_("Device: %s\n"), cxt->dev_path);
-	if (disklabel == SUN_LABEL || disklabel == SGI_LABEL)
+	if (disklabel == SUN_LABEL || disklabel == SGI_LABEL ||
+	    disklabel == GPT_LABEL)
 		print_buffer(cxt, cxt->firstsector);
 	else for (i = 3; i < partitions; i++)
 		     print_buffer(cxt, ptes[i].sectorbuffer);
