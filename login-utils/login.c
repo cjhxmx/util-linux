@@ -109,7 +109,7 @@ struct login_context {
 	char		vcsan[VCS_PATH_MAX];
 #endif
 
-	char		thishost[MAXHOSTNAMELEN + 1];	/* this machine */
+	char		*thishost;			/* this machine */
 	char		*thisdomain;			/* this machine domain */
 	char		*hostname;			/* remote machine */
 	char		hostaddress[16];		/* remote address */
@@ -209,13 +209,13 @@ static void __attribute__ ((__noreturn__)) sleepexit(int eval)
 
 static const char *get_thishost(struct login_context *cxt, const char **domain)
 {
-	if (!*cxt->thishost) {
-		if (gethostname(cxt->thishost, sizeof(cxt->thishost))) {
+	if (!cxt->thishost) {
+		cxt->thishost = xgethostname();
+		if (!cxt->thishost) {
 			if (domain)
 				*domain = NULL;
 			return NULL;
 		}
-		cxt->thishost[sizeof(cxt->thishost) -1] = '\0';
 		cxt->thisdomain = strchr(cxt->thishost, '.');
 		if (cxt->thisdomain)
 			*cxt->thisdomain++ = '\0';
@@ -1039,13 +1039,17 @@ static int get_hushlogin_status(struct passwd *pwd)
 			gid_t egid = getegid();
 
 			sprintf(buf, "%s/%s", pwd->pw_dir, file);
-			setregid(-1, pwd->pw_gid);
-			setreuid(0, pwd->pw_uid);
-			ok = effective_access(buf, O_RDONLY) == 0;
-			setuid(0);	/* setreuid doesn't do it alone! */
-			setreuid(ruid, 0);
-			setregid(-1, egid);
 
+			if (setregid(-1, pwd->pw_gid) == 0 &&
+			    setreuid(0, pwd->pw_uid) == 0)
+				ok = effective_access(buf, O_RDONLY) == 0;
+
+			if (setuid(0) != 0 ||
+			    setreuid(ruid, 0) != 0 ||
+			    setregid(-1, egid) != 0) {
+				syslog(LOG_ALERT, _("hush login status: restore original IDs failed"));
+				exit(EXIT_FAILURE);
+			}
 			if (ok)
 				return 1;	/* enabled by user */
 		}

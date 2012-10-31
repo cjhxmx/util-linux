@@ -97,6 +97,9 @@ enum {
 	COL_DZERO,
 	COL_WWN,
 	COL_RAND,
+	COL_PKNAME,
+	COL_HCTL,
+	COL_TRANSPORT,
 };
 
 /* column names */
@@ -111,6 +114,7 @@ struct colinfo {
 static struct colinfo infos[] = {
 	[COL_NAME]   = { "NAME",    0.25, TT_FL_TREE | TT_FL_NOEXTREMES, N_("device name") },
 	[COL_KNAME]  = { "KNAME",   0.3, 0, N_("internal kernel device name") },
+	[COL_PKNAME] = { "PKNAME",   0.3, 0, N_("internal parent kernel device name") },
 	[COL_MAJMIN] = { "MAJ:MIN", 6, 0, N_("major:minor device number") },
 	[COL_FSTYPE] = { "FSTYPE",  0.1, TT_FL_TRUNC, N_("filesystem type") },
 	[COL_TARGET] = { "MOUNTPOINT", 0.10, TT_FL_TRUNC, N_("where the device is mounted") },
@@ -144,7 +148,8 @@ static struct colinfo infos[] = {
 	[COL_DMAX]   = { "DISC-MAX", 6, TT_FL_RIGHT, N_("discard max bytes") },
 	[COL_DZERO]  = { "DISC-ZERO", 1, TT_FL_RIGHT, N_("discard zeroes data") },
 	[COL_WWN]    = { "WWN",     18, 0, N_("unique storage identifier") },
-
+	[COL_HCTL]   = { "HCTL", 10, 0, N_("Host:Channel:Target:Lun for SCSI") },
+	[COL_TRANSPORT] = { "TRAN", 6, 0, N_("device transport type") },
 };
 
 struct lsblk {
@@ -572,6 +577,59 @@ static char *get_type(struct blkdev_cxt *cxt)
 	return res;
 }
 
+/* Thanks to lsscsi code for idea of detection logic used here */
+static char *get_transport(struct blkdev_cxt *cxt)
+{
+	struct sysfs_cxt *sysfs = &cxt->sysfs;
+	char *attr = NULL;
+	const char *trans = NULL;
+
+	/* SPI - Serial Peripheral Interface */
+	if (sysfs_scsi_host_is(sysfs, "spi"))
+		trans = "spi";
+
+	/* FC/FCoE - Fibre Channel / Fibre Channel over Ethernet */
+	else if (sysfs_scsi_host_is(sysfs, "fc")) {
+		attr = sysfs_scsi_host_strdup_attribute(sysfs, "fc", "symbolic_name");
+		if (!attr)
+			return NULL;
+		trans = strstr(attr, " over ") ? "fcoe" : "fc";
+		free(attr);
+	}
+
+	/* SAS - Serial Attached SCSI */
+	else if (sysfs_scsi_host_is(sysfs, "sas") ||
+		 sysfs_scsi_has_attribute(sysfs, "sas_device"))
+		trans = "sas";
+
+
+	/* SBP - Serial Bus Protocol (FireWire) */
+	else if (sysfs_scsi_has_attribute(sysfs, "ieee1394_id"))
+		trans = "sbp";
+
+	/* iSCSI */
+	else if (sysfs_scsi_host_is(sysfs, "iscsi"))
+		trans ="iscsi";
+
+	/* USB - Universal Serial Bus */
+	else if (sysfs_scsi_path_contains(sysfs, "usb"))
+		trans = "usb";
+
+	/* ATA, SATA */
+	else if (sysfs_scsi_host_is(sysfs, "scsi")) {
+		attr = sysfs_scsi_host_strdup_attribute(sysfs, "scsi", "proc_name");
+		if (!attr)
+			return NULL;
+		if (!strncmp(attr, "ahci", 4) || !strncmp(attr, "sata", 4))
+			trans = "sata";
+		else if (strstr(attr, "ata"))
+			trans = "ata";
+		free(attr);
+	}
+
+	return trans ? xstrdup(trans) : NULL;
+}
+
 #define is_parsable(_l)	(((_l)->tt->flags & TT_FL_RAW) || \
 			 ((_l)->tt->flags & TT_FL_EXPORT))
 
@@ -599,6 +657,10 @@ static void set_tt_data(struct blkdev_cxt *cxt, int col, int id, struct tt_line 
 		}
 	case COL_KNAME:
 		tt_line_set_data(ln, col, xstrdup(cxt->name));
+		break;
+	case COL_PKNAME:
+		if (cxt->parent)
+			tt_line_set_data(ln, col, xstrdup(cxt->parent->name));
 		break;
 	case COL_OWNER:
 	{
@@ -763,6 +825,20 @@ static void set_tt_data(struct blkdev_cxt *cxt, int col, int id, struct tt_line 
 		break;
 	case COL_TYPE:
 		p = get_type(cxt);
+		if (p)
+			tt_line_set_data(ln, col, p);
+		break;
+	case COL_HCTL:
+	{
+		int h, c, t, l;
+		if (sysfs_scsi_get_hctl(&cxt->sysfs, &h, &c, &t, &l) == 0) {
+			snprintf(buf, sizeof(buf), "%d:%d:%d:%d", h, c, t, l);
+			tt_line_set_data(ln, col, xstrdup(buf));
+		}
+		break;
+	}
+	case COL_TRANSPORT:
+		p = get_transport(cxt);
 		if (p)
 			tt_line_set_data(ln, col, p);
 		break;
@@ -969,7 +1045,7 @@ static int get_wholedisk_from_partition_dirent(DIR *dir, const char *dirname,
 	int len;
 
 	if ((len = readlink_at(dirfd(dir), dirname,
-			       d->d_name, path, sizeof(path))) < 0)
+			       d->d_name, path, sizeof(path) - 1)) < 0)
 		return 0;
 
 	path[len] = '\0';
@@ -1082,7 +1158,7 @@ static char *devno_to_sysfs_name(dev_t devno, char *devname, char *buf, size_t b
 		return NULL;
 	}
 
-	len = readlink(path, buf, buf_size);
+	len = readlink(path, buf, buf_size - 1);
 	if (len < 0) {
 		warn(_("%s: failed to read link"), path);
 		return NULL;

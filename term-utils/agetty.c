@@ -1232,6 +1232,41 @@ static void auto_baud(struct termios *tp)
 	tcsetattr(STDIN_FILENO, TCSANOW, tp);
 }
 
+static char *xgethostname(void)
+{
+	char *name;
+	size_t sz = get_hostname_max() + 1;
+
+	name = malloc(sizeof(char) * sz);
+	if (!name)
+		log_err(_("failed to allocate memory: %m"));
+
+	if (gethostname(name, sz) != 0)
+		return NULL;
+
+	name[sz - 1] = '\0';
+	return name;
+}
+
+static char *xgetdomainname(void)
+{
+#ifdef HAVE_GETDOMAINNAME
+	char *name;
+	size_t sz = get_hostname_max() + 1;
+
+	name = malloc(sizeof(char) * sz);
+	if (!name)
+		log_err(_("failed to allocate memory: %m"));
+
+	if (getdomainname(name, sz) != 0)
+		return NULL;
+
+	name[sz - 1] = '\0';
+	return name;
+#endif
+	return NULL;
+}
+
 /* Show login prompt, optionally preceded by /etc/issue contents. */
 static void do_prompt(struct options *op, struct termios *tp)
 {
@@ -1305,21 +1340,34 @@ static void do_prompt(struct options *op, struct termios *tp)
 	}
 #endif /* KDGKBLED */
 	if ((op->flags & F_NOHOSTNAME) == 0) {
-		char hn[MAXHOSTNAMELEN + 1];
-		if (gethostname(hn, sizeof(hn)) == 0) {
-			struct hostent *ht;
-			char *dot = strchr(hn, '.');
+		char *hn = xgethostname();
 
-			hn[MAXHOSTNAMELEN] = '\0';
+		if (hn) {
+			char *dot = strchr(hn, '.');
+			char *cn = hn;
+			struct addrinfo *res = NULL;
+
 			if ((op->flags & F_LONGHNAME) == 0) {
 				if (dot)
 					*dot = '\0';
-				write_all(STDOUT_FILENO, hn, strlen(hn));
-			} else if (dot == NULL && (ht = gethostbyname(hn)))
-				write_all(STDOUT_FILENO, ht->h_name, strlen(ht->h_name));
-			else
-				write_all(STDOUT_FILENO, hn, strlen(hn));
+
+			} else if (dot == NULL) {
+				struct addrinfo hints;
+
+				memset(&hints, 0, sizeof(hints));
+				hints.ai_flags = AI_CANONNAME;
+
+				if (!getaddrinfo(hn, NULL, &hints, &res)
+				    && res && res->ai_canonname)
+					cn = res->ai_canonname;
+			}
+
+			write_all(STDOUT_FILENO, cn, strlen(cn));
 			write_all(STDOUT_FILENO, " ", 1);
+
+			if (res)
+				freeaddrinfo(res);
+			free(hn);
 		}
 	}
 	if (op->autolog == (char*)0) {
@@ -2010,7 +2058,7 @@ static void output_iface_ip(struct ifaddrs *addrs, const char *iface, sa_family_
 
 static void output_ip(sa_family_t family)
 {
-	char host[MAXHOSTNAMELEN + 1];
+	char *host;
 	struct addrinfo hints, *info = NULL;
 
 	memset(&hints, 0, sizeof(hints));
@@ -2018,9 +2066,8 @@ static void output_ip(sa_family_t family)
 	if (family == AF_INET6)
 		hints.ai_flags = AI_V4MAPPED;
 
-	if (gethostname(host, sizeof(host)) == 0
-	    && getaddrinfo(host, NULL, &hints, &info) == 0
-	    && info) {
+	host = xgethostname();
+	if (host && getaddrinfo(host, NULL, &hints, &info) == 0 && info) {
 
 		void *addr = NULL;
 		char buff[INET6_ADDRSTRLEN + 1];
@@ -2038,6 +2085,7 @@ static void output_ip(sa_family_t family)
 
 		freeaddrinfo(info);
 	}
+	free(host);
 }
 
 /*
@@ -2104,36 +2152,32 @@ static void output_special_char(unsigned char c, struct options *op,
 		break;
 	case 'o':
 	{
-		char domainname[MAXHOSTNAMELEN+1];
-#ifdef HAVE_GETDOMAINNAME
-		if (getdomainname(domainname, sizeof(domainname)))
-#endif
-		strcpy(domainname, "unknown_domain");
-		domainname[sizeof(domainname)-1] = '\0';
-		printf("%s", domainname);
+		char *dom = xgetdomainname();
+
+		fputs(dom ? dom : "unknown_domain", stdout);
+		free(dom);
 		break;
 	}
 	case 'O':
 	{
-		char *dom = "unknown_domain";
-		char host[MAXHOSTNAMELEN+1];
+		char *dom = NULL;
+		char *host = xgethostname();
 		struct addrinfo hints, *info = NULL;
 
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_flags = AI_CANONNAME;
 
-		if (gethostname(host, sizeof(host)) ||
-		    getaddrinfo(host, NULL, &hints, &info) ||
-		    info == NULL)
-			fputs(dom, stdout);
-		else {
+		if (host && getaddrinfo(host, NULL, &hints, &info) == 0 && info) {
 			char *canon;
+
 			if (info->ai_canonname &&
 			    (canon = strchr(info->ai_canonname, '.')))
 				dom = canon + 1;
-			fputs(dom, stdout);
-			freeaddrinfo(info);
 		}
+		fputs(dom ? dom : "unknown_domain", stdout);
+		if (info)
+			freeaddrinfo(info);
+		free(host);
 		break;
 	}
 	case 'd':

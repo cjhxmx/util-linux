@@ -45,6 +45,7 @@
 
 #include "mountP.h"
 #include "strutils.h"
+#include "loopdev.h"
 
 /**
  * mnt_new_table:
@@ -906,6 +907,9 @@ static int is_mountinfo(struct libmnt_table *tb)
  */
 int mnt_table_is_fs_mounted(struct libmnt_table *tb, struct libmnt_fs *fstab_fs)
 {
+	struct libmnt_iter itr;
+	struct libmnt_fs *fs;
+
 	char *root = NULL;
 	const char *src = NULL, *tgt = NULL;
 	char *xtgt = NULL;
@@ -938,43 +942,65 @@ int mnt_table_is_fs_mounted(struct libmnt_table *tb, struct libmnt_fs *fstab_fs)
 
 	tgt = mnt_fs_get_target(fstab_fs);
 
-	if (tgt && src) {
-		struct libmnt_iter itr;
-		struct libmnt_fs *fs;
+	if (!tgt || !src)
+		goto done;
 
-		mnt_reset_iter(&itr, MNT_ITER_FORWARD);
+	mnt_reset_iter(&itr, MNT_ITER_FORWARD);
 
-		while (mnt_table_next_fs(tb, &itr, &fs) == 0) {
+	while (mnt_table_next_fs(tb, &itr, &fs) == 0) {
 
-			if (!mnt_fs_streq_srcpath(fs, src))
-				continue;
-
-			if (root) {
-				const char *r = mnt_fs_get_root(fs);
-				if (!r || strcmp(r, root) != 0)
-					continue;
-			}
-
-			/*
-			 * Compare target, try to minimize number of situations
-			 * when we need to canonicalize the path to avoid
-			 * readlink() on mountpoints.
+		if (!mnt_fs_streq_srcpath(fs, src)) {
+			/* The source does not match. Maybe the source is a loop
+			 * device backing file.
 			 */
-			if (!xtgt) {
-				if (mnt_fs_streq_target(fs, tgt))
-					break;
-				if (tb->cache)
-					xtgt = mnt_resolve_path(tgt, tb->cache);
-			}
-			if (xtgt && mnt_fs_streq_target(fs, xtgt))
-				break;
+			uint64_t offset = 0;
+			char *val;
+			size_t len;
+			int flags;
 
+			if (!mnt_fs_is_kernel(fs) ||
+			    !mnt_fs_get_srcpath(fs) ||
+			    !startswith(mnt_fs_get_srcpath(fs), "/dev/loop"))
+				continue;	/* does not look like loopdev */
+
+			if (mnt_fs_get_option(fstab_fs, "offset", &val, &len) == 0 &&
+			    mnt_parse_offset(val, len, &offset)) {
+				DBG(FS, mnt_debug_h(fstab_fs, "failed to parse offset="));
+				continue;
+			} else
+				flags = LOOPDEV_FL_OFFSET;
+
+			if (loopdev_is_used(mnt_fs_get_srcpath(fs), src, offset, flags))
+				break;
 		}
-		if (fs)
-			rc = 1;		/* success */
+
+		if (root) {
+			const char *r = mnt_fs_get_root(fs);
+			if (!r || strcmp(r, root) != 0)
+				continue;
+		}
+
+		/*
+		 * Compare target, try to minimize number of situations when we
+		 * need to canonicalize the path to avoid readlink() on
+		 * mountpoints.
+		 */
+		if (!xtgt) {
+			if (mnt_fs_streq_target(fs, tgt))
+				break;
+			if (tb->cache)
+				xtgt = mnt_resolve_path(tgt, tb->cache);
+		}
+		if (xtgt && mnt_fs_streq_target(fs, xtgt))
+			break;
 	}
 
+	if (fs)
+		rc = 1;		/* success */
+done:
 	free(root);
+
+	DBG(TAB, mnt_debug_h(tb, "mnt_table_is_fs_mounted: %s [rc=%d]", src, rc));
 	return rc;
 }
 
