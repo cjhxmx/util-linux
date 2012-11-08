@@ -1,7 +1,7 @@
 /*
  * lsblk(8) - list block devices
  *
- * Copyright (C) 2010,2011 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010,2011,2012 Red Hat, Inc. All rights reserved.
  * Written by Milan Broz <mbroz@redhat.com>
  *            Karel Zak <kzak@redhat.com>
  *
@@ -100,6 +100,8 @@ enum {
 	COL_PKNAME,
 	COL_HCTL,
 	COL_TRANSPORT,
+	COL_REV,
+	COL_VENDOR,
 };
 
 /* column names */
@@ -150,6 +152,8 @@ static struct colinfo infos[] = {
 	[COL_WWN]    = { "WWN",     18, 0, N_("unique storage identifier") },
 	[COL_HCTL]   = { "HCTL", 10, 0, N_("Host:Channel:Target:Lun for SCSI") },
 	[COL_TRANSPORT] = { "TRAN", 6, 0, N_("device transport type") },
+	[COL_REV]    = { "REV",   4, TT_FL_RIGHT, N_("device revision") },
+	[COL_VENDOR] = { "VENDOR", 0.1, TT_FL_TRUNC, N_("device vendor") },
 };
 
 struct lsblk {
@@ -158,6 +162,7 @@ struct lsblk {
 	unsigned int bytes:1;		/* print SIZE in bytes */
 	unsigned int inverse:1;		/* print inverse dependencies */
 	unsigned int nodeps:1;		/* don't print slaves/holders */
+	unsigned int scsi:1;		/* print only device with HCTL (SCSI) */
 };
 
 struct lsblk *lsblk;	/* global handler */
@@ -584,7 +589,7 @@ static char *get_transport(struct blkdev_cxt *cxt)
 	char *attr = NULL;
 	const char *trans = NULL;
 
-	/* SPI - Serial Peripheral Interface */
+	/* SCSI - Serial Peripheral Interface */
 	if (sysfs_scsi_host_is(sysfs, "spi"))
 		trans = "spi";
 
@@ -762,6 +767,20 @@ static void set_tt_data(struct blkdev_cxt *cxt, int col, int id, struct tt_line 
 	case COL_MODEL:
 		if (!cxt->partition && cxt->nslaves == 0) {
 			p = sysfs_strdup(&cxt->sysfs, "device/model");
+			if (p)
+				tt_line_set_data(ln, col, p);
+		}
+		break;
+	case COL_REV:
+		if (!cxt->partition && cxt->nslaves == 0) {
+			p = sysfs_strdup(&cxt->sysfs, "device/rev");
+			if (p)
+				tt_line_set_data(ln, col, p);
+		}
+		break;
+	case COL_VENDOR:
+		if (!cxt->partition && cxt->nslaves == 0) {
+			p = sysfs_strdup(&cxt->sysfs, "device/vendor");
 			if (p)
 				tt_line_set_data(ln, col, p);
 		}
@@ -958,6 +977,10 @@ static int set_cxt(struct blkdev_cxt *cxt,
 	cxt->nholders = sysfs_count_dirents(&cxt->sysfs, "holders");
 	cxt->nslaves = sysfs_count_dirents(&cxt->sysfs, "slaves");
 
+	/* ignore non-SCSI devices */
+	if (lsblk->scsi && sysfs_scsi_get_hctl(&cxt->sysfs, NULL, NULL, NULL, NULL))
+		return -1;
+
 	return 0;
 }
 
@@ -1020,12 +1043,12 @@ static int list_partitions(struct blkdev_cxt *wholedisk_cxt, struct blkdev_cxt *
 			 *   `-<part_cxt>
 			 *    `-...
 			 */
-			if (set_cxt(&part_cxt, wholedisk_cxt, wholedisk_cxt, d->d_name))
-				goto next;
+			int ps = set_cxt(&part_cxt, wholedisk_cxt, wholedisk_cxt, d->d_name);
+
 			/* Print whole disk only once */
 			if (r)
 				print_device(wholedisk_cxt, parent_cxt ? parent_cxt->tt_line : NULL);
-			if (!lsblk->nodeps)
+			if (ps == 0 && !lsblk->nodeps)
 				process_blkdev(&part_cxt, wholedisk_cxt, 0, NULL);
 		}
 	next:
@@ -1312,6 +1335,7 @@ static void __attribute__((__noreturn__)) help(FILE *out)
 		" -r, --raw            use raw output format\n"
 		" -s, --inverse        inverse dependencies\n"
 		" -t, --topology       output info about topology\n"
+		" -S, --scsi           output info about SCSI devices\n"
 		" -V, --version        output version information and exit\n"));
 
 	fprintf(out, _("\nAvailable columns (for --output):\n"));
@@ -1356,6 +1380,7 @@ int main(int argc, char *argv[])
 		{ "include",    1, 0, 'I' },
 		{ "topology",   0, 0, 't' },
 		{ "pairs",      0, 0, 'P' },
+		{ "scsi",       0, 0, 'S' },
 		{ "version",    0, 0, 'V' },
 		{ NULL, 0, 0, 0 },
 	};
@@ -1376,7 +1401,7 @@ int main(int argc, char *argv[])
 	memset(lsblk, 0, sizeof(*lsblk));
 
 	while((c = getopt_long(argc, argv,
-			       "abdDe:fhlnmo:PiI:rstV", longopts, NULL)) != -1) {
+			       "abdDe:fhlnmo:PiI:rstVS", longopts, NULL)) != -1) {
 
 		err_exclusive_options(c, longopts, excl, excl_st);
 
@@ -1454,6 +1479,17 @@ int main(int argc, char *argv[])
 			columns[ncolumns++] = COL_SCHED;
 			columns[ncolumns++] = COL_RQ_SIZE;
 			columns[ncolumns++] = COL_RA;
+			break;
+		case 'S':
+			lsblk->nodeps = 1;
+			lsblk->scsi = 1;
+			columns[ncolumns++] = COL_NAME;
+			columns[ncolumns++] = COL_HCTL;
+			columns[ncolumns++] = COL_TYPE;
+			columns[ncolumns++] = COL_VENDOR;
+			columns[ncolumns++] = COL_MODEL;
+			columns[ncolumns++] = COL_REV;
+			columns[ncolumns++] = COL_TRANSPORT;
 			break;
 		case 'V':
 			printf(_("%s from %s\n"), program_invocation_short_name,
