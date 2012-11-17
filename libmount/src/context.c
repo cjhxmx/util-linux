@@ -153,6 +153,7 @@ int mnt_reset_context(struct libmnt_context *cxt)
 	cxt->flags = MNT_FL_DEFAULT;
 
 	mnt_context_reset_status(cxt);
+	mnt_context_set_tabfilter(cxt, NULL, NULL);
 
 	/* restore non-resetable flags */
 	cxt->flags |= (fl & MNT_FL_EXTERN_FSTAB);
@@ -168,6 +169,7 @@ int mnt_reset_context(struct libmnt_context *cxt)
 	cxt->flags |= (fl & MNT_FL_FORCE);
 	cxt->flags |= (fl & MNT_FL_NOCANONICALIZE);
 	cxt->flags |= (fl & MNT_FL_RDONLY_UMOUNT);
+	cxt->flags |= (fl & MNT_FL_NOSWAPMATCH);
 	return 0;
 }
 
@@ -712,15 +714,14 @@ const char *mnt_context_get_target(struct libmnt_context *cxt)
  * @cxt: mount context
  * @fstype: filesystem type
  *
- * Note that the @fstype has to be the real FS type. For comma-separated list of
- * filesystems or for "nofs" notation use mnt_context_set_fstype_pattern().
+ * Note that the @fstype has to be the real FS type. For patterns with
+ * comma-separated list of filesystems or for "nofs" notation use
+ * mnt_context_set_fstype_pattern().
  *
  * Returns: 0 on success, negative number in case of error.
  */
 int mnt_context_set_fstype(struct libmnt_context *cxt, const char *fstype)
 {
-	if (fstype && strchr(fstype, ','))
-		return -EINVAL;
 	return mnt_fs_set_fstype(mnt_context_get_fs(cxt), fstype);
 }
 
@@ -938,6 +939,9 @@ int mnt_context_get_mtab(struct libmnt_context *cxt, struct libmnt_table **tb)
 
 	if (tb)
 		*tb = cxt->mtab;
+
+	DBG(CXT, mnt_debug_h(cxt, "mtab requested [nents=%d]",
+				mnt_table_get_nents(cxt->mtab)));
 	return 0;
 }
 
@@ -960,6 +964,7 @@ int mnt_context_set_tabfilter(struct libmnt_context *cxt,
 				cxt->table_fltrcb,
 				cxt->table_fltrcb_data);
 
+	DBG(CXT, mnt_debug_h(cxt, "tabfiler %s", fltr ? "ENABLED!" : "disabled"));
 	return 0;
 }
 
@@ -1475,6 +1480,9 @@ int mnt_context_prepare_helper(struct libmnt_context *cxt, const char *name,
 
 	if (!type)
 		type = mnt_fs_get_fstype(cxt->fs);
+
+	if (type && strchr(type, ','))
+		return 0;			/* type is fstype pattern */
 
 	if (mnt_context_is_nohelpers(cxt)
 	    || !type

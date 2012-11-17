@@ -150,7 +150,9 @@ struct lscpu_desc {
 	int	dispatching;	/* none, horizontal or vertical */
 	int	mode;		/* rm, lm or/and tm */
 
-	int		ncpus;		/* number of CPUs */
+	int		ncpuspos;	/* maximal possible CPUs */
+	int		ncpus;		/* number of present CPUs */
+	cpu_set_t	*present;	/* mask with present CPUs */
 	cpu_set_t	*online;	/* mask with online CPUs */
 
 	int		nnodes;		/* number of NUMA modes */
@@ -204,8 +206,11 @@ struct lscpu_modifier {
 static int maxcpus;		/* size in bits of kernel cpu mask */
 
 #define is_cpu_online(_d, _cpu) \
-		((_d) && (_d)->online ? \
-			CPU_ISSET_S((_cpu), CPU_ALLOC_SIZE(maxcpus), (_d)->online) : 0)
+	((_d) && (_d)->online ? \
+		CPU_ISSET_S((_cpu), CPU_ALLOC_SIZE(maxcpus), (_d)->online) : 0)
+#define is_cpu_present(_d, _cpu) \
+	((_d) && (_d)->present ? \
+		CPU_ISSET_S((_cpu), CPU_ALLOC_SIZE(maxcpus), (_d)->present) : 0)
 
 /*
  * IDs
@@ -334,15 +339,12 @@ read_basicinfo(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 	FILE *fp = path_fopen("r", 1, _PATH_PROC_CPUINFO);
 	char buf[BUFSIZ];
 	struct utsname utsbuf;
+	size_t setsize;
 
 	/* architecture */
 	if (uname(&utsbuf) == -1)
 		err(EXIT_FAILURE, _("error: uname failed"));
 	desc->arch = xstrdup(utsbuf.machine);
-
-	/* count CPU(s) */
-	while(path_exist(_PATH_SYS_SYSTEM "/cpu/cpu%d", desc->ncpus))
-		desc->ncpus++;
 
 	/* details */
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
@@ -391,11 +393,27 @@ read_basicinfo(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 	if (maxcpus <= 0)
 		/* error or we are reading some /sys snapshot instead of the
 		 * real /sys, let's use any crazy number... */
-		maxcpus = desc->ncpus > 2048 ? desc->ncpus : 2048;
+		maxcpus = 2048;
+
+	setsize = CPU_ALLOC_SIZE(maxcpus);
+
+	if (path_exist(_PATH_SYS_SYSTEM "/cpu/possible")) {
+		cpu_set_t *tmp = path_cpulist(maxcpus, _PATH_SYS_SYSTEM "/cpu/possible");
+		desc->ncpuspos = CPU_COUNT_S(setsize, tmp);
+		cpuset_free(tmp);
+	} else
+		err(EXIT_FAILURE, _("failed to determine number of CPUs: %s"),
+				_PATH_SYS_SYSTEM "/cpu/possible");
+
+
+	/* get mask for present CPUs */
+	if (path_exist(_PATH_SYS_SYSTEM "/cpu/present")) {
+		desc->present = path_cpulist(maxcpus, _PATH_SYS_SYSTEM "/cpu/present");
+		desc->ncpus = CPU_COUNT_S(setsize, desc->present);
+	}
 
 	/* get mask for online CPUs */
 	if (path_exist(_PATH_SYS_SYSTEM "/cpu/online")) {
-		size_t setsize = CPU_ALLOC_SIZE(maxcpus);
 		desc->online = path_cpulist(maxcpus, _PATH_SYS_SYSTEM "/cpu/online");
 		desc->nthreads = CPU_COUNT_S(setsize, desc->online);
 	}
@@ -609,16 +627,26 @@ read_topology(struct lscpu_desc *desc, int num)
 
 		/* threads within one core */
 		nthreads = CPU_COUNT_S(setsize, thread_siblings);
+		if (!nthreads)
+			nthreads = 1;
+
 		/* cores within one socket */
 		ncores = CPU_COUNT_S(setsize, core_siblings) / nthreads;
-		/* number of sockets within one book.
-		 * Because of odd / non-present cpu maps and to keep
-		 * calculation easy we make sure that nsockets and
-		 * nbooks is at least 1.
+		if (!ncores)
+			ncores = 1;
+
+		/* number of sockets within one book.  Because of odd /
+		 * non-present cpu maps and to keep calculation easy we make
+		 * sure that nsockets and nbooks is at least 1.
 		 */
-		nsockets = desc->ncpus / nthreads / ncores ?: 1;
+		nsockets = desc->ncpus / nthreads / ncores;
+		if (!nsockets)
+			nsockets = 1;
+
 		/* number of books */
-		nbooks = desc->ncpus / nthreads / ncores / nsockets ?: 1;
+		nbooks = desc->ncpus / nthreads / ncores / nsockets;
+		if (!nbooks)
+			nbooks = 1;
 
 		/* all threads, see also read_basicinfo()
 		 * -- fallback for kernels without
@@ -626,16 +654,17 @@ read_topology(struct lscpu_desc *desc, int num)
 		 */
 		if (!desc->nthreads)
 			desc->nthreads = nbooks * nsockets * ncores * nthreads;
-		/* For each map we make sure that it can have up to ncpus
+
+		/* For each map we make sure that it can have up to ncpuspos
 		 * entries. This is because we cannot reliably calculate the
 		 * number of cores, sockets and books on all architectures.
 		 * E.g. completely virtualized architectures like s390 may
 		 * have multiple sockets of different sizes.
 		 */
-		desc->coremaps = xcalloc(desc->ncpus, sizeof(cpu_set_t *));
-		desc->socketmaps = xcalloc(desc->ncpus, sizeof(cpu_set_t *));
+		desc->coremaps = xcalloc(desc->ncpuspos, sizeof(cpu_set_t *));
+		desc->socketmaps = xcalloc(desc->ncpuspos, sizeof(cpu_set_t *));
 		if (book_siblings)
-			desc->bookmaps = xcalloc(desc->ncpus, sizeof(cpu_set_t *));
+			desc->bookmaps = xcalloc(desc->ncpuspos, sizeof(cpu_set_t *));
 	}
 
 	add_cpuset_to_array(desc->socketmaps, &desc->nsockets, core_siblings);
@@ -653,7 +682,7 @@ read_polarization(struct lscpu_desc *desc, int num)
 	if (!path_exist(_PATH_SYS_CPU "/cpu%d/polarization", num))
 		return;
 	if (!desc->polarization)
-		desc->polarization = xcalloc(desc->ncpus, sizeof(int));
+		desc->polarization = xcalloc(desc->ncpuspos, sizeof(int));
 	path_getstr(mode, sizeof(mode), _PATH_SYS_CPU "/cpu%d/polarization", num);
 	if (strncmp(mode, "vertical:low", sizeof(mode)) == 0)
 		desc->polarization[num] = POLAR_VLOW;
@@ -673,7 +702,7 @@ read_address(struct lscpu_desc *desc, int num)
 	if (!path_exist(_PATH_SYS_CPU "/cpu%d/address", num))
 		return;
 	if (!desc->addresses)
-		desc->addresses = xcalloc(desc->ncpus, sizeof(int));
+		desc->addresses = xcalloc(desc->ncpuspos, sizeof(int));
 	desc->addresses[num] = path_getnum(_PATH_SYS_CPU "/cpu%d/address", num);
 }
 
@@ -683,7 +712,7 @@ read_configured(struct lscpu_desc *desc, int num)
 	if (!path_exist(_PATH_SYS_CPU "/cpu%d/configure", num))
 		return;
 	if (!desc->configured)
-		desc->configured = xcalloc(desc->ncpus, sizeof(int));
+		desc->configured = xcalloc(desc->ncpuspos, sizeof(int));
 	desc->configured[num] = path_getnum(_PATH_SYS_CPU "/cpu%d/configure", num);
 }
 
@@ -756,7 +785,7 @@ read_cache(struct lscpu_desc *desc, int num)
 				  num, i);
 
 		if (!ca->sharedmaps)
-			ca->sharedmaps = xcalloc(desc->ncpus, sizeof(cpu_set_t *));
+			ca->sharedmaps = xcalloc(desc->ncpuspos, sizeof(cpu_set_t *));
 		add_cpuset_to_array(ca->sharedmaps, &ca->nsharedmaps, map);
 	}
 }
@@ -982,12 +1011,14 @@ print_parsable(struct lscpu_desc *desc, int cols[], int ncols,
 	/*
 	 * Data
 	 */
-	for (i = 0; i < desc->ncpus; i++) {
+	for (i = 0; i < desc->ncpuspos; i++) {
 		int c;
 
 		if (!mod->offline && desc->online && !is_cpu_online(desc, i))
 			continue;
 		if (!mod->online && desc->online && is_cpu_online(desc, i))
+			continue;
+		if (desc->present && !is_cpu_present(desc, i))
 			continue;
 		for (c = 0; c < ncols; c++) {
 			if (mod->compat && cols[c] == COL_CACHE) {
@@ -1026,13 +1057,15 @@ print_readable(struct lscpu_desc *desc, int cols[], int ncols,
 		tt_define_column(tt, xstrdup(data), 0, 0);
 	}
 
-	for (i = 0; i < desc->ncpus; i++) {
+	for (i = 0; i < desc->ncpuspos; i++) {
 		int c;
 		struct tt_line *line;
 
 		if (!mod->offline && desc->online && !is_cpu_online(desc, i))
 			continue;
 		if (!mod->online && desc->online && is_cpu_online(desc, i))
+			continue;
+		if (desc->present && !is_cpu_present(desc, i))
 			continue;
 
 		line = tt_add_line(tt, NULL);
@@ -1117,8 +1150,8 @@ print_summary(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 		if (!set)
 			err(EXIT_FAILURE, _("failed to callocate cpu set"));
 		CPU_ZERO_S(setsize, set);
-		for (i = 0; i < desc->ncpus; i++) {
-			if (!is_cpu_online(desc, i))
+		for (i = 0; i < desc->ncpuspos; i++) {
+			if (!is_cpu_online(desc, i) && is_cpu_present(desc, i))
 				CPU_SET_S(i, setsize, set);
 		}
 		print_cpuset(mod->hex ? _("Off-line CPU(s) mask:") :
@@ -1339,7 +1372,7 @@ int main(int argc, char *argv[])
 
 	read_basicinfo(desc, mod);
 
-	for (i = 0; i < desc->ncpus; i++) {
+	for (i = 0; i < desc->ncpuspos; i++) {
 		read_topology(desc, i);
 		read_cache(desc, i);
 		read_polarization(desc, i);
