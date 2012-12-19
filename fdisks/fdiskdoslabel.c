@@ -26,11 +26,58 @@ static struct fdisk_parttype dos_parttypes[] = {
 		s |= (sector >> 2) & 0xc0;				\
 	}
 
-#define alignment_required	(cxt->grain != cxt->sector_size)
+#define alignment_required(_x)	((_x)->grain != (_x)->sector_size)
 
 struct pte ptes[MAXIMUM_PARTS];
 sector_t extended_offset;
 int ext_index;
+
+unsigned int units_per_sector = 1, display_in_cyl_units = 0;
+
+void update_units(struct fdisk_context *cxt)
+{
+	int cyl_units = cxt->geom.heads * cxt->geom.sectors;
+
+	if (display_in_cyl_units && cyl_units)
+		units_per_sector = cyl_units;
+	else
+		units_per_sector = 1;	/* in sectors */
+}
+
+void change_units(struct fdisk_context *cxt)
+{
+	display_in_cyl_units = !display_in_cyl_units;
+	update_units(cxt);
+
+	if (display_in_cyl_units)
+		printf(_("Changing display/entry units to cylinders (DEPRECATED!)\n"));
+	else
+		printf(_("Changing display/entry units to sectors\n"));
+}
+
+
+static void warn_alignment(struct fdisk_context *cxt)
+{
+	if (nowarn)
+		return;
+
+	if (cxt->sector_size != cxt->phy_sector_size)
+		fprintf(stderr, _("\n"
+"The device presents a logical sector size that is smaller than\n"
+"the physical sector size. Aligning to a physical sector (or optimal\n"
+"I/O) size boundary is recommended, or performance may be impacted.\n"));
+
+	if (dos_compatible_flag)
+		fprintf(stderr, _("\n"
+"WARNING: DOS-compatible mode is deprecated. It's strongly recommended to\n"
+"         switch off the mode (with command 'c')."));
+
+	if (display_in_cyl_units)
+		fprintf(stderr, _("\n"
+"WARNING: cylinders as display units are deprecated. Use command 'u' to\n"
+"         change units to sectors.\n"));
+
+}
 
 static int get_nonexisting_partition(struct fdisk_context *cxt, int warn, int max)
 {
@@ -68,8 +115,11 @@ static void read_pte(struct fdisk_context *cxt, int pno, sector_t offset)
 	struct pte *pe = &ptes[pno];
 
 	pe->offset = offset;
-	pe->sectorbuffer = xmalloc(cxt->sector_size);
-	read_sector(cxt, offset, pe->sectorbuffer);
+	pe->sectorbuffer = xcalloc(1, cxt->sector_size);
+
+	if (read_sector(cxt, offset, pe->sectorbuffer) != 0)
+		fprintf(stderr, _("Failed to read extended partition table (offset=%jd)\n"),
+					(uintmax_t) offset);
 	pe->changed = 0;
 	pe->part_table = pe->ext_pointer = NULL;
 }
@@ -115,7 +165,7 @@ void dos_init(struct fdisk_context *cxt)
 {
 	int i;
 
-	disklabel = DOS_LABEL;
+	cxt->disklabel = FDISK_DISKLABEL_DOS;
 	partitions = 4;
 	ext_index = 0;
 	extended_offset = 0;
@@ -364,8 +414,24 @@ static void get_partition_table_geometry(struct fdisk_context *cxt,
 		*ph = hh;
 		*ps = ss;
 	}
+
+	DBG(CONTEXT, dbgprint("DOS PT geometry: heads=%u, sectors=%u", *ph, *ps));
 }
 
+static int dos_reset_alignment(struct fdisk_context *cxt)
+{
+	/* overwrite necessary stuff by DOS deprecated stuff */
+	if (dos_compatible_flag) {
+		if (cxt->geom.sectors)
+			cxt->first_lba = cxt->geom.sectors;	/* usually 63 */
+
+		cxt->grain = cxt->sector_size;			/* usually 512 */
+	}
+	/* units_per_sector has impact to deprecated DOS stuff */
+	update_units(cxt);
+
+	return 0;
+}
 
 static int dos_probe_label(struct fdisk_context *cxt)
 {
@@ -456,7 +522,8 @@ static void set_partition(struct fdisk_context *cxt,
 	ptes[i].changed = 1;
 }
 
-static sector_t get_unused_start(int part_n, sector_t start,
+static sector_t get_unused_start(struct fdisk_context *cxt,
+				 int part_n, sector_t start,
 				 sector_t first[], sector_t last[])
 {
 	int i;
@@ -465,8 +532,8 @@ static sector_t get_unused_start(int part_n, sector_t start,
 		sector_t lastplusoff;
 
 		if (start == ptes[i].offset)
-			start += sector_offset;
-		lastplusoff = last[i] + ((part_n < 4) ? 0 : sector_offset);
+			start += cxt->first_lba;
+		lastplusoff = last[i] + ((part_n < 4) ? 0 : cxt->first_lba);
 		if (start >= first[i] && start <= lastplusoff)
 			start = lastplusoff + 1;
 	}
@@ -474,22 +541,7 @@ static sector_t get_unused_start(int part_n, sector_t start,
 	return start;
 }
 
-static sector_t align_lba_in_range(struct fdisk_context *cxt,
-				   sector_t lba, sector_t start, sector_t stop)
-{
-	start = align_lba(cxt, start, ALIGN_UP);
-	stop = align_lba(cxt, stop, ALIGN_DOWN);
-
-	lba = align_lba(cxt, lba, ALIGN_NEAREST);
-
-	if (lba < start)
-		return start;
-	else if (lba > stop)
-		return stop;
-	return lba;
-}
-
-static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttype *t)
+static int add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttype *t)
 {
 	char mesg[256];		/* 48 does not suffice in Japanese */
 	int i, sys, read = 0;
@@ -503,11 +555,11 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 	if (p && p->sys_ind) {
 		printf(_("Partition %d is already defined.  Delete "
 			 "it before re-adding it.\n"), n + 1);
-		return;
+		return -EINVAL;
 	}
 	fill_bounds(first, last);
 	if (n < 4) {
-		start = sector_offset;
+		start = cxt->first_lba;
 		if (display_in_cyl_units || !cxt->total_sectors)
 			limit = cxt->geom.heads * cxt->geom.sectors * cxt->geom.cylinders - 1;
 		else
@@ -522,7 +574,7 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 				get_nr_sects(q) - 1;
 		}
 	} else {
-		start = extended_offset + sector_offset;
+		start = extended_offset + cxt->first_lba;
 		limit = get_start_sect(q) + get_nr_sects(q) - 1;
 	}
 	if (display_in_cyl_units)
@@ -534,12 +586,12 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 		sector_t dflt, aligned;
 
 		temp = start;
-		dflt = start = get_unused_start(n, start, first, last);
+		dflt = start = get_unused_start(cxt, n, start, first, last);
 
 		/* the default sector should be aligned and unused */
 		do {
 			aligned = align_lba_in_range(cxt, dflt, dflt, limit);
-			dflt = get_unused_start(n, aligned, first, last);
+			dflt = get_unused_start(cxt, n, aligned, first, last);
 		} while (dflt != aligned && dflt > aligned && dflt < limit);
 
 		if (dflt >= limit)
@@ -566,10 +618,10 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 	if (n > 4) {			/* NOT for fifth partition */
 		struct pte *pe = &ptes[n];
 
-		pe->offset = start - sector_offset;
+		pe->offset = start - cxt->first_lba;
 		if (pe->offset == extended_offset) { /* must be corrected */
 			pe->offset++;
-			if (sector_offset == 1)
+			if (cxt->first_lba == 1)
 				start++;
 		}
 	}
@@ -586,7 +638,7 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 		printf(_("No free sectors available\n"));
 		if (n > 4)
 			partitions--;
-		return;
+		return -ENOSPC;
 	}
 	if (cround(start) == cround(limit)) {
 		stop = limit;
@@ -606,7 +658,7 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 				stop = limit;
 		}
 
-		if (is_suffix_used && alignment_required) {
+		if (is_suffix_used && alignment_required(cxt)) {
 			/* the last sector has not been exactly requested (but
 			 * defined by +size{K,M,G} convention), so be smart
 			 * and align the end of the partition. The next
@@ -635,9 +687,11 @@ static void add_partition(struct fdisk_context *cxt, int n, struct fdisk_parttyp
 		pe4->changed = 1;
 		partitions = 5;
 	}
+
+	return 0;
 }
 
-static void add_logical(struct fdisk_context *cxt)
+static int add_logical(struct fdisk_context *cxt)
 {
 	if (partitions > 5 || ptes[4].part_table->sys_ind) {
 		struct pte *pe = &ptes[partitions];
@@ -650,7 +704,7 @@ static void add_logical(struct fdisk_context *cxt)
 		partitions++;
 	}
 	printf(_("Adding logical partition %d\n"), partitions);
-	add_partition(cxt, partitions - 1, NULL);
+	return add_partition(cxt, partitions - 1, NULL);
 }
 
 static int dos_verify_disklabel(struct fdisk_context *cxt)
@@ -723,32 +777,32 @@ static int dos_verify_disklabel(struct fdisk_context *cxt)
  *
  * API callback.
  */
-static void dos_add_partition(
+static int dos_add_partition(
 			struct fdisk_context *cxt,
 			int partnum __attribute__ ((__unused__)),
 			struct fdisk_parttype *t)
 {
-	int i, free_primary = 0;
+	int i, free_primary = 0, rc = 0;
 
 	for (i = 0; i < 4; i++)
 		free_primary += !ptes[i].part_table->sys_ind;
 
 	if (!free_primary && partitions >= MAXIMUM_PARTS) {
 		printf(_("The maximum number of partitions has been created\n"));
-		return;
+		return -EINVAL;
 	}
 
 	if (!free_primary) {
 		if (extended_offset) {
 			printf(_("All primary partitions are in use\n"));
-			add_logical(cxt);
+			rc = add_logical(cxt);
 		} else
 			printf(_("If you want to create more than four partitions, you must replace a\n"
 				 "primary partition with an extended partition first.\n"));
 	} else if (partitions >= MAXIMUM_PARTS) {
 		printf(_("All logical partitions are in use\n"));
 		printf(_("Adding a primary partition\n"));
-		add_partition(cxt, get_partition(cxt, 0, 4), t);
+		rc = add_partition(cxt, get_partition(cxt, 0, 4), t);
 	} else {
 		char c, dflt, line[LINE_LENGTH];
 
@@ -770,27 +824,36 @@ static void dos_add_partition(
 		if (c == 'p') {
 			int i = get_nonexisting_partition(cxt, 0, 4);
 			if (i >= 0)
-				add_partition(cxt, i, t);
-			return;
+				rc = add_partition(cxt, i, t);
+			goto done;
 		} else if (c == 'l' && extended_offset) {
-			add_logical(cxt);
-			return;
+			rc = add_logical(cxt);
+			goto done;
 		} else if (c == 'e' && !extended_offset) {
 			int i = get_nonexisting_partition(cxt, 0, 4);
 			if (i >= 0) {
 				t = fdisk_get_parttype_from_code(cxt, EXTENDED);
-				add_partition(cxt, i, t);
+				rc = add_partition(cxt, i, t);
 			}
-			return;
+			goto done;
 		} else
 			printf(_("Invalid partition type `%c'\n"), c);
 	}
+done:
+	return rc;
 }
 
 static int write_sector(struct fdisk_context *cxt, sector_t secno,
 			       unsigned char *buf)
 {
-	seek_sector(cxt, secno);
+	int rc;
+
+	rc = seek_sector(cxt, secno);
+	if (rc != 0) {
+		fprintf(stderr, _("write sector %jd failed: seek failed"),
+				(uintmax_t) secno);
+		return rc;
+	}
 	if (write(cxt->dev_fd, buf, cxt->sector_size) != (ssize_t) cxt->sector_size)
 		return -errno;
 	return 0;
@@ -885,4 +948,5 @@ const struct fdisk_label dos_label =
 	.part_delete = dos_delete_partition,
 	.part_get_type = dos_get_parttype,
 	.part_set_type = dos_set_parttype,
+	.reset_alignment = dos_reset_alignment,
 };

@@ -247,6 +247,20 @@ static struct gpt_header *bheader = NULL;
 /* partition entry array */
 static struct gpt_entry *ents = NULL;
 
+#define gpt_partition_start(_e)		le64_to_cpu((_e)->lba_start)
+#define gpt_partition_end(_e)		le64_to_cpu((_e)->lba_end)
+
+/*
+ * Returns the partition length, or 0 if end is before beginning.
+ */
+static uint64_t gpt_partition_size(const struct gpt_entry *e)
+{
+	uint64_t start = gpt_partition_start(e);
+	uint64_t end = gpt_partition_end(e);
+
+	return start > end ? 0 : end - start + 1ULL;
+}
+
 /*
  * UUID is traditionally 16 byte big-endian array, except Intel EFI
  * specification where the UUID is a structure of little-endian fields.
@@ -292,9 +306,9 @@ unknown:
 	return "unknown";
 }
 
-static inline int partition_unused(struct gpt_entry e)
+static inline int partition_unused(const struct gpt_entry *e)
 {
-	return !memcmp(&e.partition_type_guid, &GPT_UNUSED_ENTRY_GUID,
+	return !memcmp(&e->partition_type_guid, &GPT_UNUSED_ENTRY_GUID,
 			sizeof(struct gpt_guid));
 }
 
@@ -390,7 +404,7 @@ static int gpt_mknew_header_from_bkp(struct fdisk_context *cxt,
 static int gpt_mknew_header(struct fdisk_context *cxt,
 			    struct gpt_header *header, uint64_t lba)
 {
-	uint64_t esz = 0;
+	uint64_t esz = 0, first, last;
 
 	if (!cxt || !header)
 		return -ENOSYS;
@@ -407,8 +421,16 @@ static int gpt_mknew_header(struct fdisk_context *cxt,
 	 */
 	header->npartition_entries     = cpu_to_le32(GPT_NPARTITIONS);
 	header->sizeof_partition_entry = cpu_to_le32(sizeof(struct gpt_entry));
-	header->first_usable_lba       = cpu_to_le64(esz + 2);
-	header->last_usable_lba        = cpu_to_le64(cxt->total_sectors - 2 - esz);
+
+	last = cxt->total_sectors - 2 - esz;
+	first = esz + 2;
+
+	if (first < cxt->first_lba && cxt->first_lba < last)
+		/* Align according to topology */
+		first = cxt->first_lba;
+
+	header->first_usable_lba = cpu_to_le64(first);
+	header->last_usable_lba  = cpu_to_le64(last);
 
 	gpt_mknew_header_common(cxt, header, lba);
 	uuid_generate_random((unsigned char *) &header->disk_guid);
@@ -724,21 +746,11 @@ static uint32_t partitions_in_use(struct gpt_header *header, struct gpt_entry *e
 		return 0;
 
 	for (i = 0; i < le32_to_cpu(header->npartition_entries); i++)
-		if (!partition_unused(e[i]))
+		if (!partition_unused(&e[i]))
 			used++;
 	return used;
 }
 
-/*
- * Returns the partition length, or 0 if end is before beginning.
- */
-static uint64_t partition_size(struct gpt_entry e)
-{
-	uint64_t start = le64_to_cpu(e.lba_start);
-	uint64_t end = le64_to_cpu(e.lba_end);
-
-	return start > end ? 0 : end - start + 1ULL;
-}
 
 /*
  * Check if a partition is too big for the disk (sectors).
@@ -750,9 +762,9 @@ static int partition_check_too_big(struct gpt_header *header,
 	uint32_t i;
 
 	for (i = 0; i < le32_to_cpu(header->npartition_entries); i++) {
-		if (partition_unused(e[i]))
+		if (partition_unused(&e[i]))
 			continue;
-		if (e[i].lba_end >= sectors)
+		if (gpt_partition_end(&e[i]) >= sectors)
 			return i + 1;
 	}
 
@@ -768,9 +780,9 @@ static int partition_start_after_end(struct gpt_header *header, struct gpt_entry
 	uint32_t i;
 
 	for (i = 0; i < le32_to_cpu(header->npartition_entries); i++) {
-		if (partition_unused(e[i]))
+		if (partition_unused(&e[i]))
 			continue;
-		if (e[i].lba_start > e[i].lba_end)
+		if (gpt_partition_start(&e[i]) > gpt_partition_end(&e[i]))
 			return i + 1;
 	}
 
@@ -780,10 +792,14 @@ static int partition_start_after_end(struct gpt_header *header, struct gpt_entry
 /*
  * Check if partition e1 overlaps with partition e2
  */
-static inline int partition_overlap(struct gpt_entry e1, struct gpt_entry e2)
+static inline int partition_overlap(struct gpt_entry *e1, struct gpt_entry *e2)
 {
-	return (e1.lba_start && e2.lba_start &&
-		(e1.lba_start <= e2.lba_end) != (e1.lba_end < e2.lba_start));
+	uint64_t start1 = gpt_partition_start(e1);
+	uint64_t end1   = gpt_partition_end(e1);
+	uint64_t start2 = gpt_partition_start(e2);
+	uint64_t end2   = gpt_partition_end(e2);
+
+	return (start1 && start2 && (start1 <= end2) != (end1 < start2));
 }
 
 /*
@@ -795,10 +811,10 @@ static int partition_check_overlaps(struct gpt_header *header, struct gpt_entry 
 
 	for (i = 0; i < le32_to_cpu(header->npartition_entries); i++)
 		for (j = 0; j < i; j++) {
-			if (partition_unused(e[i]) ||
-			    partition_unused(e[j]))
+			if (partition_unused(&e[i]) ||
+			    partition_unused(&e[j]))
 				continue;
-			if (partition_overlap(e[i], e[j]))
+			if (partition_overlap(&e[i], &e[j]))
 				/* two overlaping partitions is enough! */
 				return i + 1;
 		}
@@ -816,14 +832,19 @@ static uint64_t find_first_available(struct gpt_header *header,
 	uint64_t first;
 	uint32_t i, first_moved = 0;
 
+	uint64_t fu, lu;
+
 	if (!header || !e)
 		return 0;
+
+	fu = le64_to_cpu(header->first_usable_lba);
+	lu = le64_to_cpu(header->last_usable_lba);
 
 	/*
 	 * Begin from the specified starting point or from the first usable
 	 * LBA, whichever is greater...
 	 */
-	first = start < header->first_usable_lba ? header->first_usable_lba : start;
+	first = start < fu ? fu : start;
 
 	/*
 	 * Now search through all partitions; if first is within an
@@ -835,18 +856,18 @@ static uint64_t find_first_available(struct gpt_header *header,
 	do {
 		first_moved = 0;
 		for (i = 0; i < le32_to_cpu(header->npartition_entries); i++) {
-			if (partition_unused(e[i]))
+			if (partition_unused(&e[i]))
 				continue;
-			if (first < e[i].lba_start)
+			if (first < gpt_partition_start(&e[i]))
 				continue;
-			if (first <= e[i].lba_end) {
-				first = e[i].lba_end + 1;
+			if (first <= gpt_partition_end(&e[i])) {
+				first = gpt_partition_end(&e[i]) + 1;
 				first_moved = 1;
 			}
 		}
 	} while (first_moved == 1);
 
-	if (first > header->last_usable_lba)
+	if (first > lu)
 		first = 0;
 
 	return first;
@@ -863,11 +884,13 @@ static uint64_t find_last_free(struct gpt_header *header,
 	if (!header || !e)
 		return 0;
 
-	nearest_start = header->last_usable_lba;
+	nearest_start = le64_to_cpu(header->last_usable_lba);
+
 	for (i = 0; i < le32_to_cpu(header->npartition_entries); i++) {
-		if (nearest_start > e[i].lba_start &&
-		    e[i].lba_start > start)
-			nearest_start = e[i].lba_start - 1;
+		uint64_t ps = gpt_partition_start(&e[i]);
+
+		if (nearest_start > ps && ps > start)
+			nearest_start = ps - 1;
 	}
 
 	return nearest_start;
@@ -884,13 +907,13 @@ static uint64_t find_last_free_sector(struct gpt_header *header,
 		goto done;
 
 	/* start by assuming the last usable LBA is available */
-	last = header->last_usable_lba;
+	last = le64_to_cpu(header->last_usable_lba);
 	do {
 		last_moved = 0;
 		for (i = 0; i < le32_to_cpu(header->npartition_entries); i++) {
-			if ((last >= e[i].lba_start) &&
-			    (last <= e[i].lba_end)) {
-				last = e[i].lba_start - 1;
+			if ((last >= gpt_partition_start(&e[i])) &&
+			    (last <= gpt_partition_end(&e[i]))) {
+				last = gpt_partition_start(&e[i]) - 1;
 				last_moved = 1;
 			}
 		}
@@ -961,8 +984,10 @@ static uint64_t get_free_sectors(struct fdisk_context *cxt, struct gpt_header *h
 	} while (first_sect);
 
 done:
-	*nsegments = num;
-	*largest_segment = largest_seg;
+	if (nsegments)
+		*nsegments = num;
+	if (largest_segment)
+		*largest_segment = largest_seg;
 
 	return totfound;
 }
@@ -970,16 +995,16 @@ done:
 /*
  * Initialize fdisk-specific variables - call once probing passes!
  */
-static void gpt_init(void)
+static void gpt_init(struct fdisk_context *cxt)
 {
-	disklabel = GPT_LABEL;
+	cxt->disklabel = FDISK_DISKLABEL_GPT;
 	partitions = le32_to_cpu(pheader->npartition_entries);
 }
 
 /*
  * Deinitialize fdisk-specific variables
  */
-static void gpt_deinit(void)
+static void gpt_deinit(struct fdisk_context *cxt)
 {
 	free(ents);
 	free(pheader);
@@ -988,7 +1013,7 @@ static void gpt_deinit(void)
 	pheader = NULL;
 	bheader = NULL;
 
-	disklabel = ANY_LABEL;
+	cxt->disklabel = FDISK_DISKLABEL_ANY;
 	partitions = 0;
 }
 
@@ -1022,7 +1047,7 @@ static int gpt_probe_label(struct fdisk_context *cxt)
 
 	/* OK, probing passed, now initialize backup header and fdisk variables. */
 	bheader = gpt_get_bheader(cxt);
-	gpt_init();
+	gpt_init(cxt);
 
 	printf(_("\nWARNING: fdisk GPT support is currently new, and therefore "
 		 "in an experimental phase. Use at your own discretion.\n\n"));
@@ -1089,11 +1114,11 @@ void gpt_list_table(struct fdisk_context *cxt,
 
 	for (i = 0; i < le32_to_cpu(pheader->npartition_entries); i++) {
 		char *name = NULL, *sizestr = NULL;
-		uint64_t start = le64_to_cpu(ents[i].lba_start);
-		uint64_t size = partition_size(ents[i]);
+		uint64_t start = gpt_partition_start(&ents[i]);
+		uint64_t size = gpt_partition_size(&ents[i]);
 		struct fdisk_parttype *t;
 
-		if (partition_unused(ents[i]) || !size)
+		if (partition_unused(&ents[i]) || !size)
 			continue;
 
 		/* the partition has to inside usable range */
@@ -1111,13 +1136,15 @@ void gpt_list_table(struct fdisk_context *cxt,
 
 		t = fdisk_get_partition_type(cxt, i);
 
-		printf("%2d %12ld %12ld  %6s  %-15.15s %s\n",
+		printf("%2d %12ju %12ju  %6s  %-15.15s %s\n",
 		       i+1,
-		       ents[i].lba_start,
-		       ents[i].lba_end,
+		       start,
+		       gpt_partition_end(&ents[i]),
 		       sizestr,
 		       t->name,
 		       name);
+
+		check_alignment(cxt, start, i);
 
 		free(name);
 		free(sizestr);
@@ -1371,12 +1398,12 @@ static int gpt_verify_disklabel(struct fdisk_context *cxt)
 /* Delete a single GPT partition, specified by partnum. */
 static int gpt_delete_partition(struct fdisk_context *cxt, int partnum)
 {
-	if (!cxt || partition_unused(ents[partnum]) || partnum < 0)
+	if (!cxt || partition_unused(&ents[partnum]) || partnum < 0)
 		return -EINVAL;
 
 	/* hasta la vista, baby! */
 	memset(&ents[partnum], 0, sizeof(ents[partnum]));
-	if (!partition_unused(ents[partnum]))
+	if (!partition_unused(&ents[partnum]))
 		return -EINVAL;
 	else {
 		gpt_recompute_crc(pheader, ents);
@@ -1453,57 +1480,86 @@ static int gpt_create_new_partition(int partnum, uint64_t fsect, uint64_t lsect,
 }
 
 /* Performs logical checks to add a new partition entry */
-static void gpt_add_partition(struct fdisk_context *cxt, int partnum,
+static int gpt_add_partition(struct fdisk_context *cxt, int partnum,
 			     struct fdisk_parttype *t)
 {
-	char msg[256];
-	uint32_t tmp;
-	uint64_t f0, f1; /* user input ranges for first and last sectors */
-	uint64_t def_sect, first_sect, last_sect; /* first and last available sector ranges */
+	uint64_t user_f, user_l;	/* user input ranges for first and last sectors */
+	uint64_t disk_f, disk_l;	/* first and last available sector ranges on device*/
+	uint64_t dflt_f, dflt_l;	/* largest segment (default) */
 	struct gpt_guid uuid = GPT_DEFAULT_ENTRY_GUID;
 
 	/* check basic tests before even considering adding a new partition */
 	if (!cxt || partnum < 0)
-		return;
-	if (!partition_unused(ents[partnum])) {
+		return -EINVAL;
+	if (!partition_unused(&ents[partnum])) {
 		printf(_("Partition %d is already defined. "
 			 "Delete it before re-adding it.\n"), partnum +1);
-		return;
+		return -EINVAL;
 	}
 	if (le32_to_cpu(pheader->npartition_entries) == partitions_in_use(pheader, ents)) {
 		printf(_("All partitions are already in use.\n"));
-		return;
+		return -EINVAL;
 	}
 
-	if (!get_free_sectors(cxt, pheader, ents, &tmp, &f0)) {
+	if (!get_free_sectors(cxt, pheader, ents, NULL, NULL)) {
 		printf(_("No free sectors available.\n"));
-		return;
+		return -ENOSPC;
 	}
 
-	first_sect = find_first_available(pheader, ents, 0);
-	last_sect  = find_last_free_sector(pheader, ents);
-	def_sect   = find_first_in_largest(pheader, ents);
+	disk_f = find_first_available(pheader, ents, 0);
+	disk_l = find_last_free_sector(pheader, ents);
+
+	/* the default is the largest free space */
+	dflt_f = find_first_in_largest(pheader, ents);
+	dflt_l = find_last_free(pheader, ents, dflt_f);
+
+	/* align the default in range <dflt_f,dflt_l>*/
+	dflt_f = align_lba_in_range(cxt, dflt_f, dflt_f, dflt_l);
 
 	if (t && t->typestr)
 		string_to_uuid(t->typestr, &uuid);
 
 	/* get user input for first and last sectors of the new partition */
-	snprintf(msg, sizeof(msg), _("First %s"), str_units(SINGULAR));
 	for (;;) {
-		f0 = read_int(cxt, first_sect, def_sect, last_sect, 0, msg);
-		if (f0 >= first_sect && f0 <= last_sect) {
-			last_sect  = find_last_free(pheader, ents, f0);
-			snprintf(msg, sizeof(msg), _("Last %s"), str_units(SINGULAR));
-			f1 = read_int(cxt, f0, last_sect, last_sect, 0, msg);
-			if (f1 >= f0 && f1 <= last_sect)
-				break;
+		int is_suffix_used = 0;
+
+		/* first sector */
+		user_f = read_int(cxt,	disk_f,	/* minimal */
+					dflt_f, /* default */
+					disk_l, /* maximal */
+					0, _("First sector"));
+
+		if (user_f < disk_f || user_f > disk_l)
+			continue;	/* bug in read_int() dialog? */
+
+		if (user_f != find_first_available(pheader, ents, user_f)) {
+			printf(_("Sector %ju already used\n"), user_f);
+			continue;
 		}
+
+		/* Last sector */
+		dflt_l = find_last_free(pheader, ents, user_f);
+		user_l = read_int_with_suffix(cxt,
+					user_f, /* minimal */
+					dflt_l, /* default */
+					dflt_l, /* maximal */
+					user_f, /* base for relative input */
+					_("Last sector, +sectors or +size{K,M,G}"),
+					&is_suffix_used);
+
+		if (is_suffix_used)
+			user_l = align_lba_in_range(cxt, user_l, user_f, dflt_l) - 1;
+
+		if (user_l > user_f && user_l <= disk_l)
+			break;
 	}
 
-	if (gpt_create_new_partition(partnum, f0, f1, &uuid, ents) != 0)
+	if (gpt_create_new_partition(partnum, user_f, user_l, &uuid, ents) != 0)
 		printf(_("Could not create partition %d\n"), partnum + 1);
 	else
 		printf(_("Created partition %d\n"), partnum + 1);
+
+	return 0;
 }
 
 /*
@@ -1523,7 +1579,7 @@ static int gpt_create_disklabel(struct fdisk_context *cxt)
 	 * dealing with a new, empty disk - so always allocate memory
 	 * to deal with the data structures whatever the case is.
 	 */
-	gpt_deinit();
+	gpt_deinit(cxt);
 
 	rc = gpt_mknew_pmbr(cxt);
 	if (rc < 0)
@@ -1546,16 +1602,16 @@ static int gpt_create_disklabel(struct fdisk_context *cxt)
 	gpt_recompute_crc(pheader, ents);
 	gpt_recompute_crc(bheader, ents);
 
-	gpt_init();
-	DBG(LABEL, dbgprint("created new empty GPT disklabel "
-			    "(GUID: %08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X)",
+	gpt_init(cxt);
+	fprintf(stderr, ("Building a new GPT disklabel "
+			    "(GUID: %08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X)\n"),
 			    pheader->disk_guid.time_low, pheader->disk_guid.time_mid,
 			    pheader->disk_guid.time_hi_and_version,
 			    pheader->disk_guid.clock_seq_hi,
 			    pheader->disk_guid.clock_seq_low,
 			    pheader->disk_guid.node[0], pheader->disk_guid.node[1],
 			    pheader->disk_guid.node[2], pheader->disk_guid.node[3],
-			    pheader->disk_guid.node[4], pheader->disk_guid.node[5]));
+			    pheader->disk_guid.node[4], pheader->disk_guid.node[5]);
 done:
 	return rc;
 }

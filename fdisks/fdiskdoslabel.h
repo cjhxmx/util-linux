@@ -24,7 +24,7 @@ extern int dos_compatible_flag;
 					      (n) * sizeof(struct partition)))
 
 extern int ext_index; /* the prime extended partition */
-extern sector_t extended_offset, sector_offset;
+extern sector_t extended_offset;
 
 /* A valid partition table sector ends in 0x55 0xaa */
 static inline unsigned int part_table_flag(unsigned char *b)
@@ -42,5 +42,8 @@ extern void dos_set_mbr_id(struct fdisk_context *cxt);
 extern void dos_init(struct fdisk_context *cxt);
 
 extern int mbr_is_valid_magic(unsigned char *b);
+
+extern void change_units(struct fdisk_context *cxt);
+extern void update_units(struct fdisk_context *cxt);	/* called from sunlabel too */
 
 #endif

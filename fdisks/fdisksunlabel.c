@@ -24,6 +24,7 @@
 #include "common.h"
 #include "fdisk.h"
 #include "fdisksunlabel.h"
+#include "fdiskdoslabel.h"
 
 static int     other_endian = 0;
 
@@ -72,9 +73,9 @@ static void set_sun_partition(struct fdisk_context *cxt,
 	print_partition_size(cxt, i + 1, start, stop, sysid);
 }
 
-static void init(void)
+static void init(struct fdisk_context *cxt)
 {
-	disklabel = SUN_LABEL;
+	cxt->disklabel = FDISK_DISKLABEL_SUN;
 	partitions = SUN_NUM_PARTITIONS;
 }
 
@@ -89,7 +90,7 @@ static int sun_probe_label(struct fdisk_context *cxt)
 		return 0;
 	}
 
-	init();
+	init(cxt);
 	other_endian = (sunlabel->magic == SUN_LABEL_MAGIC_SWAPPED);
 
 	ush = ((unsigned short *) (sunlabel + 1)) - 1;
@@ -140,7 +141,6 @@ static int sun_probe_label(struct fdisk_context *cxt)
 			set_changed(0);
 		}
 	}
-	update_units(cxt);
 	return 1;
 }
 
@@ -159,7 +159,7 @@ static int sun_create_disklabel(struct fdisk_context *cxt)
 	other_endian = 0;
 #endif
 
-	init();
+	init(cxt);
 	fdisk_zeroize_firstsector(cxt);
 
 	sunlabel->magic = SSWAP16(SUN_LABEL_MAGIC);
@@ -364,8 +364,8 @@ static int sun_verify_disklabel(struct fdisk_context *cxt)
     return 0;
 }
 
-static void sun_add_partition(struct fdisk_context *cxt, int n,
-			      struct fdisk_parttype *t)
+static int sun_add_partition(struct fdisk_context *cxt, int n,
+			     struct fdisk_parttype *t)
 {
 	uint32_t starts[SUN_NUM_PARTITIONS], lens[SUN_NUM_PARTITIONS];
 	struct sun_partition *part = &sunlabel->partitions[n];
@@ -380,7 +380,7 @@ static void sun_add_partition(struct fdisk_context *cxt, int n,
 	if (part->num_sectors && tag->tag != SSWAP16(SUN_TAG_UNASSIGNED)) {
 		printf(_("Partition %d is already defined.  Delete "
 			"it before re-adding it.\n"), n + 1);
-		return;
+		return -EINVAL;
 	}
 
 	fetch_sun(cxt, starts, lens, &start, &stop);
@@ -391,7 +391,7 @@ static void sun_add_partition(struct fdisk_context *cxt, int n,
 		else {
 			printf(_("Other partitions already cover the whole disk.\nDelete "
 			       "some/shrink them before retry.\n"));
-			return;
+			return -EINVAL;
 		}
 	}
 	snprintf(mesg, sizeof(mesg), _("First %s"), str_units(SINGULAR));
@@ -484,6 +484,7 @@ and is of type `Whole disk'\n"));
 		sys = SUN_TAG_BACKUP;
 
 	set_sun_partition(cxt, n, first, last, sys);
+	return 0;
 }
 
 static int sun_delete_partition(struct fdisk_context *cxt, int partnum)
@@ -675,6 +676,14 @@ static int sun_set_parttype(struct fdisk_context *cxt, int i,
 	return 0;
 }
 
+
+static int sun_reset_alignment(struct fdisk_context *cxt)
+{
+	/* this is shared with DOS ... */
+	update_units(cxt);
+	return 0;
+}
+
 const struct fdisk_label sun_label =
 {
 	.name = "sun",
@@ -689,5 +698,5 @@ const struct fdisk_label sun_label =
 	.part_delete = sun_delete_partition,
 	.part_get_type = sun_get_parttype,
 	.part_set_type = sun_set_parttype,
-
+	.reset_alignment = sun_reset_alignment,
 };

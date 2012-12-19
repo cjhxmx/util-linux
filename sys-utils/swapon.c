@@ -141,21 +141,20 @@ static void add_tt_line(struct tt *tt, struct libmnt_fs *fs, int bytes)
 
 	for (i = 0; i < ncolumns; i++) {
 		char *str = NULL;
-		int rc = 0;
 		off_t size;
 
 		switch (get_column_id(i)) {
 		case COL_PATH:
-			rc = xasprintf(&str, "%s", mnt_fs_get_source(fs));
+			xasprintf(&str, "%s", mnt_fs_get_source(fs));
 			break;
 		case COL_TYPE:
-			rc = xasprintf(&str, "%s", mnt_fs_get_swaptype(fs));
+			xasprintf(&str, "%s", mnt_fs_get_swaptype(fs));
 			break;
 		case COL_SIZE:
 			size = mnt_fs_get_size(fs);
 			size *= 1024;	/* convert to bytes */
 			if (bytes)
-				rc = xasprintf(&str, "%jd", size);
+				xasprintf(&str, "%jd", size);
 			else
 				str = size_to_human_string(SIZE_SUFFIX_1LETTER, size);
 			break;
@@ -163,18 +162,18 @@ static void add_tt_line(struct tt *tt, struct libmnt_fs *fs, int bytes)
 			size = mnt_fs_get_usedsize(fs);
 			size *= 1024;	/* convert to bytes */
 			if (bytes)
-				rc = xasprintf(&str, "%jd", size);
+				xasprintf(&str, "%jd", size);
 			else
 				str = size_to_human_string(SIZE_SUFFIX_1LETTER, size);
 			break;
 		case COL_PRIO:
-			rc = xasprintf(&str, "%d", mnt_fs_get_priority(fs));
+			xasprintf(&str, "%d", mnt_fs_get_priority(fs));
 			break;
 		default:
 			break;
 		}
 
-		if (rc || str)
+		if (str)
 			tt_line_set_data(line, i, str);
 	}
 	return;
@@ -212,11 +211,11 @@ static int display_summary(void)
 static int show_table(int tt_flags, int bytes)
 {
 	struct libmnt_table *st = get_swaps();
-	struct libmnt_iter *itr;
+	struct libmnt_iter *itr = NULL;
 	struct libmnt_fs *fs;
 
 	int i, rc = 0;
-	struct tt *tt;
+	struct tt *tt = NULL;
 
 	if (!st)
 		return -1;
@@ -228,7 +227,7 @@ static int show_table(int tt_flags, int bytes)
 	tt = tt_new_table(tt_flags);
 	if (!tt) {
 		warn(_("failed to initialize output table"));
-		return -1;
+		goto done;
 	}
 
 	for (i = 0; i < ncolumns; i++) {
@@ -244,9 +243,9 @@ static int show_table(int tt_flags, int bytes)
 	while (mnt_table_next_fs(st, itr, &fs) == 0)
 		add_tt_line(tt, fs, bytes);
 
-	mnt_free_iter(itr);
 	tt_print_table(tt);
  done:
+	mnt_free_iter(itr);
 	tt_free_table(tt);
 	return rc;
 }

@@ -730,7 +730,7 @@ static void set_tt_data(struct blkdev_cxt *cxt, int col, int id, struct tt_line 
 		break;
 	case COL_PARTUUID:
 		probe_device(cxt);
-		if (cxt->uuid)
+		if (cxt->partuuid)
 			tt_line_set_data(ln, col, xstrdup(cxt->partuuid));
 		break;
 	case COL_WWN:
@@ -787,10 +787,9 @@ static void set_tt_data(struct blkdev_cxt *cxt, int col, int id, struct tt_line 
 		break;
 	case COL_SIZE:
 		if (cxt->size) {
-			if (lsblk->bytes) {
-				if (xasprintf(&p, "%jd", cxt->size) < 0)
-					p = NULL;
-			} else
+			if (lsblk->bytes)
+				xasprintf(&p, "%jd", cxt->size);
+			else
 				p = size_to_human_string(SIZE_SUFFIX_1LETTER, cxt->size);
 			if (p)
 				tt_line_set_data(ln, col, p);

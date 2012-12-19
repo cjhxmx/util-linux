@@ -168,7 +168,7 @@ static char *zone_map;
 static void
 reset(void) {
 	if (termios_set)
-		tcsetattr(0, TCSANOW, &termios);
+		tcsetattr(STDIN_FILENO, TCSANOW, &termios);
 }
 
 static void
@@ -294,7 +294,7 @@ check_mount(void) {
 		return;
 
 	printf(_("%s is mounted.	 "), device_name);
-	if (isatty(0) && isatty(1))
+	if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))
 		cont = ask(_("Do you really want to continue"), 0);
 	else
 		cont = 0;
@@ -584,9 +584,9 @@ read_superblock(void) {
 static void
 read_tables(void) {
 	unsigned long inodes = get_ninodes();
-	unsigned long buffsz = get_inode_buffer_size();
-	unsigned long norm_first_zone = first_zone_data();
-	unsigned long first_zone = get_first_zone();
+	size_t buffsz = get_inode_buffer_size();
+	off_t norm_first_zone = first_zone_data();
+	off_t first_zone = get_first_zone();
 	unsigned long zones = get_nzones();
 	unsigned long imaps = get_nimaps();
 	unsigned long zmaps = get_nzmaps();
@@ -999,7 +999,7 @@ static void
 check_file2(struct minix2_inode *dir, unsigned int offset) {
 	static char blk[MINIX_BLOCK_SIZE];
 	struct minix2_inode *inode;
-	unsigned long ino;
+	ino_t ino;
 	char *name;
 	int block;
 
@@ -1064,7 +1064,7 @@ check_file2(struct minix2_inode *dir, unsigned int offset) {
 static void
 recursive_check(unsigned int ino) {
 	struct minix_inode *dir;
-	unsigned int offset;
+	off_t offset;
 
 	dir = Inode + ino;
 	if (!S_ISDIR(dir->i_mode))
@@ -1081,7 +1081,7 @@ recursive_check(unsigned int ino) {
 static void
 recursive_check2(unsigned int ino) {
 	struct minix2_inode *dir;
-	unsigned int offset;
+	off_t offset;
 
 	dir = Inode2 + ino;
 	if (!S_ISDIR(dir->i_mode))
@@ -1238,7 +1238,7 @@ int
 main(int argc, char **argv) {
 	struct termios tmp;
 	int count;
-	int retcode = 0;
+	int retcode = FSCK_EX_OK;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
@@ -1297,7 +1297,7 @@ main(int argc, char **argv) {
 		usage();
 	check_mount();		/* trying to check a mounted filesystem? */
 	if (repair && !automatic) {
-		if (!isatty(0) || !isatty(1))
+		if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
 			die(_("need terminal for interactive repairs"));
 	}
 	IN = open(device_name, repair ? O_RDWR : O_RDONLY);
@@ -1330,10 +1330,10 @@ main(int argc, char **argv) {
 	signal(SIGTERM, fatalsig);
 
 	if (repair && !automatic) {
-		tcgetattr(0, &termios);
+		tcgetattr(STDIN_FILENO, &termios);
 		tmp = termios;
 		tmp.c_lflag &= ~(ICANON | ECHO);
-		tcsetattr(0, TCSANOW, &tmp);
+		tcsetattr(STDIN_FILENO, TCSANOW, &tmp);
 		termios_set = 1;
 	}
 
@@ -1381,7 +1381,7 @@ main(int argc, char **argv) {
 		write_super_block();
 
 	if (repair && !automatic)
-		tcsetattr(0, TCSANOW, &termios);
+		tcsetattr(STDIN_FILENO, TCSANOW, &termios);
 
 	if (changed)
 		retcode += 3;

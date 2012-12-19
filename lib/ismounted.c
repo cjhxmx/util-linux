@@ -26,6 +26,11 @@
 #include "pathnames.h"
 #include "ismounted.h"
 #include "c.h"
+#ifdef __linux__
+# include "loopdev.h"
+#endif
+
+
 
 #ifdef HAVE_MNTENT_H
 /*
@@ -47,6 +52,7 @@ static int check_mntent_file(const char *mtab_file, const char *file,
 	*mount_flags = 0;
 	if ((f = setmntent (mtab_file, "r")) == NULL)
 		return errno;
+
 	if (stat(file, &st_buf) == 0) {
 		if (S_ISBLK(st_buf.st_mode)) {
 #ifndef __GNU__ /* The GNU hurd is broken with respect to stat devices */
@@ -57,22 +63,31 @@ static int check_mntent_file(const char *mtab_file, const char *file,
 			file_ino = st_buf.st_ino;
 		}
 	}
+
 	while ((mnt = getmntent (f)) != NULL) {
 		if (mnt->mnt_fsname[0] != '/')
 			continue;
 		if (strcmp(file, mnt->mnt_fsname) == 0)
 			break;
-		if (stat(mnt->mnt_fsname, &st_buf) == 0) {
-			if (S_ISBLK(st_buf.st_mode)) {
+		if (stat(mnt->mnt_fsname, &st_buf) != 0)
+			continue;
+
+		if (S_ISBLK(st_buf.st_mode)) {
 #ifndef __GNU__
-				if (file_rdev && (file_rdev == st_buf.st_rdev))
-					break;
+			if (file_rdev && file_rdev == st_buf.st_rdev)
+				break;
+#ifdef __linux__
+			/* maybe the file is loopdev backing file */
+			if (file_dev
+			    && major(st_buf.st_rdev) == LOOPDEV_MAJOR
+			    && loopdev_is_used(mnt->mnt_fsname, file, 0, 0))
+				break;
+#endif /* __linux__ */
 #endif	/* __GNU__ */
-			} else {
-				if (file_dev && ((file_dev == st_buf.st_dev) &&
-						 (file_ino == st_buf.st_ino)))
-					break;
-			}
+		} else {
+			if (file_dev && ((file_dev == st_buf.st_dev) &&
+					 (file_ino == st_buf.st_ino)))
+				break;
 		}
 	}
 

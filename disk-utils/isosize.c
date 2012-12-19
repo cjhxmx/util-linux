@@ -32,6 +32,14 @@
 
 #define ISODCL(from, to) (to - from + 1)
 
+static int is_iso(int fd)
+{
+	char label[8];
+	if (pread(fd, &label, 8, 0x8000) == -1)
+		return 1;
+	return memcmp(&label, &"\1CD001\1", 8);
+}
+
 static int isonum_721(unsigned char *p)
 {
 	return ((p[0] & 0xff)
@@ -124,6 +132,8 @@ static void isosize(char *filenamep, int xflag, long divisor)
 
 	if ((fd = open(filenamep, O_RDONLY)) < 0)
 		err(EXIT_FAILURE, _("cannot open %s"), filenamep);
+	if (is_iso(fd))
+		warnx(_("%s: might not be iso file system"), filenamep);
 
 	if (lseek(fd, 16 << 11, 0) == (off_t) - 1)
 		err(EXIT_FAILURE, _("seek error on %s"), filenamep);
@@ -153,15 +163,17 @@ static void isosize(char *filenamep, int xflag, long divisor)
 
 static void __attribute__((__noreturn__)) usage(FILE *out)
 {
-	fprintf(out, _("\nUsage:\n"
-		       " %s [options] iso9660_image_file\n"),
+	fputs(USAGE_HEADER, out);
+	fprintf(out,
+		_(" %s [options] iso9660_image_file\n"),
 		program_invocation_short_name);
-
-	fprintf(out, _("\nOptions:\n"
-		       " -d, --divisor=NUM      divide bytes NUM\n"
-		       " -x, --sectors          show sector count and size\n"
-		       " -V, --version          output version information and exit\n"
-		       " -H, --help             display this help and exit\n\n"));
+	fputs(USAGE_OPTIONS, out);
+	fputs(_(" -d, --divisor=NUM      divide bytes NUM\n"), out);
+	fputs(_(" -x, --sectors          show sector count and size\n"), out);
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
+	fprintf(out, USAGE_MAN_TAIL("isosize(8)"));
 
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -195,8 +207,7 @@ int main(int argc, char **argv)
 			xflag = 1;
 			break;
 		case 'V':
-			printf(_("%s (%s)\n"), program_invocation_short_name,
-			       PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			return EXIT_SUCCESS;
 		case 'h':
 			usage(stdout);

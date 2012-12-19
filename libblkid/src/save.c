@@ -81,11 +81,16 @@ int blkid_flush_cache(blkid_cache cache)
 	    BLKID_RUNTIME_DIR "/", sizeof(BLKID_RUNTIME_DIR)) == 0) {
 
 		/* default destination, create the directory if necessary */
-		if (stat(BLKID_RUNTIME_DIR, &st) && errno == ENOENT) {
-
-			mkdir(BLKID_RUNTIME_DIR, S_IWUSR|
-						 S_IRUSR|S_IRGRP|S_IROTH|
-						 S_IXUSR|S_IXGRP|S_IXOTH);
+		if (stat(BLKID_RUNTIME_DIR, &st)
+		    && errno == ENOENT
+		    && mkdir(BLKID_RUNTIME_DIR, S_IWUSR|
+						S_IRUSR|S_IRGRP|S_IROTH|
+						S_IXUSR|S_IXGRP|S_IXOTH) != 0
+		    && errno != EEXIST) {
+			DBG(DEBUG_SAVE,
+				printf("can't create %s directory for cache file\n",
+					BLKID_RUNTIME_DIR));
+			return 0;
 		}
 	}
 
@@ -208,7 +213,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "error (%d) probing devices\n", ret);
 		exit(1);
 	}
-	cache->bic_filename = blkid_strdup(argv[1]);
+	cache->bic_filename = strdup(argv[1]);
 
 	if ((ret = blkid_flush_cache(cache)) < 0) {
 		fprintf(stderr, "error (%d) saving cache\n", ret);

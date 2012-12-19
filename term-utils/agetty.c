@@ -148,6 +148,8 @@ struct options {
 	char *term;			/* terminal type */
 	char *initstring;		/* modem init string */
 	char *issue;			/* alternative issue file */
+	char *erasechars;		/* string with erase chars */
+	char *killchars;		/* string with kill chars */
 	int delay;			/* Sleep seconds before prompt */
 	int nice;			/* Run login with this priority */
 	int numspeed;			/* number of baud rates to try */
@@ -383,13 +385,17 @@ int main(int argc, char **argv)
 	}
 
 	chardata = init_chardata;
+
+	if (options.autolog) {
+		debug("doing auto login\n");
+		username = options.autolog;
+	}
+
 	if ((options.flags & F_NOPROMPT) == 0) {
 		if (options.autolog) {
-			/* Do the auto login. */
-			debug("doing auto login\n");
+			/* Autologin prompt */
 			do_prompt(&options, &termios);
 			printf("%s%s (automatic login)\n", LOGIN, options.autolog);
-			username = options.autolog;
 		} else {
 			/* Read the login name. */
 			debug("reading login name\n");
@@ -555,7 +561,9 @@ static void parse_args(int argc, char **argv, struct options *op)
 		NOHINTS_OPTION,
 		NOHOSTNAME_OPTION,
 		LONGHOSTNAME_OPTION,
-		HELP_OPTION
+		HELP_OPTION,
+		ERASE_CHARS_OPTION,
+		KILL_CHARS_OPTION,
 	};
 	const struct option longopts[] = {
 		{  "8bits",	     no_argument,	 0,  '8'  },
@@ -589,6 +597,8 @@ static void parse_args(int argc, char **argv, struct options *op)
 		{  "long-hostname",  no_argument,	 0,  LONGHOSTNAME_OPTION },
 		{  "version",	     no_argument,	 0,  VERSION_OPTION  },
 		{  "help",	     no_argument,	 0,  HELP_OPTION     },
+		{  "erase-chars",    required_argument,  0,  ERASE_CHARS_OPTION },
+		{  "kill-chars",     required_argument,  0,  KILL_CHARS_OPTION },
 		{ NULL, 0, 0, 0 }
 	};
 
@@ -682,6 +692,12 @@ static void parse_args(int argc, char **argv, struct options *op)
 			break;
 		case LONGHOSTNAME_OPTION:
 			op->flags |= F_LONGHNAME;
+			break;
+		case ERASE_CHARS_OPTION:
+			op->erasechars = optarg;
+			break;
+		case KILL_CHARS_OPTION:
+			op->killchars = optarg;
 			break;
 		case VERSION_OPTION:
 			printf(_("%s from %s\n"), program_invocation_short_name,
@@ -1369,7 +1385,7 @@ static void do_prompt(struct options *op, struct termios *tp)
 			free(hn);
 		}
 	}
-	if (op->autolog == (char*)0) {
+	if (!op->autolog) {
 		/* Always show login prompt. */
 		write_all(STDOUT_FILENO, LOGIN, sizeof(LOGIN) - 1);
 	}
@@ -1457,6 +1473,8 @@ static char *get_logname(struct options *op, struct termios *tp, struct chardata
 		/* Read name, watch for break and end-of-line. */
 		while (cp->eol == '\0') {
 
+			char key;
+
 			if (read(STDIN_FILENO, &c, 1) < 1) {
 
 				/* Do not report trivial like EINTR/EIO errors. */
@@ -1489,17 +1507,41 @@ static char *get_logname(struct options *op, struct termios *tp, struct chardata
 				cp->parity |= ((bits & 1) ? 1 : 2);
 			}
 
-			/* Do erase, kill and end-of-line processing. */
+			if (op->killchars && strchr(op->killchars, ascval))
+				key = CTL('U');
+			else if (op->erasechars && strchr(op->erasechars, ascval))
+				key = DEL;
+			else
+				key = ascval;
 
+			/* Do erase, kill and end-of-line processing. */
+                        ascval = key;
 			switch (ascval)
 			{
+			    case 0: /* TODO ::: should this really be done???  */
+			        *bp = 0;
+				if (op->numspeed > 1)
+					return NULL;
+				break;
+			
+				/* // TODO ::: this should erase everything...
+			    case CTL('U'):
+			        cp->kill = ascval;		// set kill character
+				while (bp > logname) {
+				    if ((tp->c_lflag & ECHO) == 0)
+				      write_all(1, erase[cp->parity], 3);
+				    bp--;
+				}
+				break;
+				*/
+			    
 			    case CTL('C'):
 			    case CTL('D'):
 			        cp->eol = ascval;
 				printf("\n");
 				fflush(0);
 				break;
-			      
+			    
                             case CR:
                             case NL:
 	                        {
@@ -1950,6 +1992,8 @@ static void __attribute__ ((__noreturn__)) usage(FILE * out)
 		       "     --nonewline            do not print a newline before issue\n"
 		       "     --no-hostname          no hostname at all will be shown\n"
 		       "     --long-hostname        show full qualified hostname\n"
+		       "     --erase-chars <string> additional backspace chars\n"
+		       "     --kill-chars <string>  additional kill chars\n"
 		       "     --version              output version information and exit\n"
 		       "     --help                 display this help and exit\n\n"));
 

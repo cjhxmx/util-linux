@@ -18,100 +18,31 @@
 #include <errno.h>
 #include <features.h>
 #include <getopt.h>
-#include <grp.h>
-#include <pwd.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <sys/sem.h>
-#include <sys/shm.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "c.h"
 #include "nls.h"
 #include "closestream.h"
 
-/*
- * SHM_DEST and SHM_LOCKED are defined in kernel headers, but inside
- * #ifdef __KERNEL__ ... #endif
- */
-#ifndef SHM_DEST
-  /* shm_mode upper byte flags */
-# define SHM_DEST	01000	/* segment will be destroyed on last detach */
-# define SHM_LOCKED	02000	/* segment will not be swapped */
-#endif
+#include "ipcutils.h"
 
-/* For older kernels the same holds for the defines below */
-#ifndef MSG_STAT
-# define MSG_STAT	11
-# define MSG_INFO	12
-#endif
-
-#ifndef SHM_STAT
-# define SHM_STAT	13
-# define SHM_INFO	14
-struct shm_info {
-	int used_ids;
-	ulong shm_tot;		/* total allocated shm */
-	ulong shm_rss;		/* total resident shm */
-	ulong shm_swp;		/* total swapped shm */
-	ulong swap_attempts;
-	ulong swap_successes;
+enum output_formats {
+	NOTSPECIFIED,
+	LIMITS,
+	STATUS,
+	CREATOR,
+	TIME,
+	PID
 };
-#endif
-
-#ifndef SEM_STAT
-# define SEM_STAT	18
-# define SEM_INFO	19
-#endif
-
-/* Some versions of libc only define IPC_INFO when __USE_GNU is defined. */
-#ifndef IPC_INFO
-# define IPC_INFO	3
-#endif
-
-/*
- * The last arg of semctl is a union semun, but where is it defined? X/OPEN
- * tells us to define it ourselves, but until recently Linux include files
- * would also define it.
- */
-#ifndef HAVE_UNION_SEMUN
-/* according to X/OPEN we have to define it ourselves */
-union semun {
-	int val;
-	struct semid_ds *buf;
-	unsigned short int *array;
-	struct seminfo *__buf;
+enum {
+	OPT_HUMAN = CHAR_MAX + 1
 };
-#endif
 
-/*
- * X/OPEN (Jan 1987) does not define fields key, seq in struct ipc_perm;
- *	glibc-1.09 has no support for sysv ipc.
- *	glibc 2 uses __key, __seq
- */
-#if defined (__GLIBC__) && __GLIBC__ >= 2
-# define KEY __key
-#else
-# define KEY key
-#endif
-
-#define LIMITS 1
-#define STATUS 2
-#define CREATOR 3
-#define TIME 4
-#define PID 5
-
-void do_shm (char format);
-void do_sem (char format);
-void do_msg (char format);
-void print_shm (int id);
-void print_msg (int id);
-void print_sem (int id);
+static void do_shm (char format, int unit);
+static void print_shm (int id, int unit);
+static void do_sem (char format);
+static void print_sem (int id);
+static void do_msg (char format, int unit);
+static void print_msg (int id, int unit);
 
 static void __attribute__ ((__noreturn__)) usage(FILE * out)
 {
@@ -135,6 +66,8 @@ static void __attribute__ ((__noreturn__)) usage(FILE * out)
 	fputs(_(" -c, --creator     show creator and owner\n"), out);
 	fputs(_(" -l, --limits      show resource limits\n"), out);
 	fputs(_(" -u, --summary     show status summary\n"), out);
+	fputs(_("     --human       show sizes in human readable format\n"), out);
+	fputs(_(" -b, --bytes       show sizes in bytes\n"), out);
 	fprintf(out, USAGE_MAN_TAIL("ipcs(1)"));
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -142,7 +75,8 @@ static void __attribute__ ((__noreturn__)) usage(FILE * out)
 int main (int argc, char **argv)
 {
 	int opt, msg = 0, sem = 0, shm = 0, id=0, print=0;
-	char format = 0;
+	char format = NOTSPECIFIED;
+	int unit = IPC_UNIT_DEFAULT;
 	static const struct option longopts[] = {
 		{"id", required_argument, NULL, 'i'},
 		{"shmems", no_argument, NULL, 'm'},
@@ -154,11 +88,13 @@ int main (int argc, char **argv)
 		{"creator", no_argument, NULL, 'c'},
 		{"limits", no_argument, NULL, 'l'},
 		{"summary", no_argument, NULL, 'u'},
+		{"human", no_argument, NULL, OPT_HUMAN},
+		{"bytes", no_argument, NULL, 'b'},
 		{"version", no_argument, NULL, 'V'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
-	char options[] = "i:mqsatpcluVh";
+	char options[] = "i:mqsatpclubVh";
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
@@ -198,6 +134,12 @@ int main (int argc, char **argv)
 		case 'u':
 			format = STATUS;
 			break;
+		case OPT_HUMAN:
+			unit = IPC_UNIT_HUMAN;
+			break;
+		case 'b':
+			unit = IPC_UNIT_BYTES;
+			break;
 		case 'h':
 			usage(stdout);
 		case 'V':
@@ -210,11 +152,11 @@ int main (int argc, char **argv)
 
 	if  (print) {
 		if (shm)
-			print_shm (id);
+			print_shm (id, unit);
 		if (sem)
 			print_sem (id);
 		if (msg)
-			print_msg (id);
+			print_msg (id, unit);
 		if (!shm && !sem && !msg )
 			usage (stderr);
 	} else {
@@ -223,7 +165,7 @@ int main (int argc, char **argv)
 		printf ("\n");
 
 		if (shm) {
-			do_shm (format);
+			do_shm (format, unit);
 			printf ("\n");
 		}
 		if (sem) {
@@ -231,74 +173,47 @@ int main (int argc, char **argv)
 			printf ("\n");
 		}
 		if (msg) {
-			do_msg (format);
+			do_msg (format, unit);
 			printf ("\n");
 		}
 	}
 	return EXIT_SUCCESS;
 }
 
-static void print_perms (int id, struct ipc_perm *ipcp)
+static void do_shm (char format, int unit)
 {
 	struct passwd *pw;
-	struct group *gr;
-
-	printf ("%-10d %-10o", id, ipcp->mode & 0777);
-
-	if ((pw = getpwuid(ipcp->cuid)))
-		printf(" %-10s", pw->pw_name);
-	else
-		printf(" %-10u", ipcp->cuid);
-	if ((gr = getgrgid(ipcp->cgid)))
-		printf(" %-10s", gr->gr_name);
-	else
-		printf(" %-10u", ipcp->cgid);
-
-	if ((pw = getpwuid(ipcp->uid)))
-		printf(" %-10s", pw->pw_name);
-	else
-		printf(" %-10u", ipcp->uid);
-	if ((gr = getgrgid(ipcp->gid)))
-		printf(" %-10s\n", gr->gr_name);
-	else
-		printf(" %-10u\n", ipcp->gid);
-}
-
-void do_shm (char format)
-{
-	int maxid, shmid, id;
-	struct shmid_ds shmseg;
-	struct shm_info shm_info;
-	struct shminfo shminfo;
-	struct ipc_perm *ipcp = &shmseg.shm_perm;
-	struct passwd *pw;
-
-	maxid = shmctl (0, SHM_INFO, (struct shmid_ds *) (void *) &shm_info);
-	if (maxid < 0) {
-		printf (_("kernel not configured for shared memory\n"));
-		return;
-	}
+	struct shm_data *shmds, *shmdsp;
 
 	switch (format) {
 	case LIMITS:
-		printf (_("------ Shared Memory Limits --------\n"));
-		if ((shmctl (0, IPC_INFO, (struct shmid_ds *) (void *) &shminfo)) < 0 )
-			return;
-		/*
-		 * glibc 2.1.3 and all earlier libc's have ints as fields of
-		 * struct shminfo; glibc 2.1.91 has unsigned long; ach
-		 */
-		printf (_("max number of segments = %lu\n"),
-			(unsigned long) shminfo.shmmni);
-		printf (_("max seg size (kbytes) = %lu\n"),
-			(unsigned long) (shminfo.shmmax >> 10));
-		printf (_("max total shared memory (kbytes) = %llu\n"),
-			getpagesize() / 1024 * (unsigned long long) shminfo.shmall);
-		printf (_("min seg size (bytes) = %lu\n"),
-			(unsigned long) shminfo.shmmin);
-		return;
+	{
+		struct ipc_limits lim;
 
+		printf (_("------ Shared Memory Limits --------\n"));
+		if (ipc_shm_get_limits(&lim))
+			return;
+		printf (_("max number of segments = %ju\n"), lim.shmmni);
+		ipc_print_size(unit == IPC_UNIT_DEFAULT ? IPC_UNIT_KB : unit,
+			       _("max seg size"), lim.shmmax, "\n", 0);
+		ipc_print_size(unit == IPC_UNIT_DEFAULT ? IPC_UNIT_KB : unit,
+			       _("max total shared memory"),
+			       lim.shmall * getpagesize(), "\n", 0);
+		ipc_print_size(unit == IPC_UNIT_DEFAULT ? IPC_UNIT_BYTES : unit,
+			       _("min seg size"), lim.shmmin, "\n", 0);
+		return;
+	}
 	case STATUS:
+	{
+		int maxid;
+		struct shm_info shm_info;
+
+		maxid = shmctl (0, SHM_INFO, (struct shmid_ds *) &shm_info);
+		if (maxid < 0) {
+			printf (_("kernel not configured for shared memory\n"));
+			return;
+		}
+
 		printf (_("------ Shared Memory Status --------\n"));
 		/*
 		 * TRANSLATORS: This output format is maintained for backward
@@ -322,7 +237,11 @@ void do_shm (char format)
 			shm_info.shm_swp,
 			shm_info.swap_attempts, shm_info.swap_successes);
 		return;
+	}
 
+	/*
+	 * Headers only
+	 */
 	case CREATOR:
 		printf (_("------ Shared Memory Segment Creators/Owners --------\n"));
 		printf ("%-10s %-10s %-10s %-10s %-10s %-10s\n",
@@ -345,102 +264,107 @@ void do_shm (char format)
 	default:
 		printf (_("------ Shared Memory Segments --------\n"));
 		printf ("%-10s %-10s %-10s %-10s %-10s %-10s %-12s\n",
-			_("key"),_("shmid"),_("owner"),_("perms"),_("bytes"),
+			_("key"),_("shmid"),_("owner"),_("perms"),
+			unit == IPC_UNIT_HUMAN ? _("size") : _("bytes"),
 			_("nattch"),_("status"));
 		break;
 	}
 
-	for (id = 0; id <= maxid; id++) {
-		shmid = shmctl (id, SHM_STAT, &shmseg);
-		if (shmid < 0)
-			continue;
+	/*
+	 * Print data
+	 */
+	if (ipc_shm_get_info(-1, &shmds) < 1)
+		return;
+	shmdsp = shmds;
+
+	for (shmdsp = shmds; shmdsp->next != NULL; shmdsp = shmdsp->next) {
 		if (format == CREATOR)  {
-			print_perms (shmid, ipcp);
+			ipc_print_perms(stdout, &shmdsp->shm_perm);
 			continue;
 		}
-		pw = getpwuid(ipcp->uid);
+		pw = getpwuid(shmdsp->shm_perm.uid);
 		switch (format) {
 		case TIME:
 			if (pw)
-				printf ("%-10d %-10.10s", shmid, pw->pw_name);
+				printf ("%-10d %-10.10s", shmdsp->shm_perm.id, pw->pw_name);
 			else
-				printf ("%-10d %-10u", shmid, ipcp->uid);
+				printf ("%-10d %-10u", shmdsp->shm_perm.id, shmdsp->shm_perm.uid);
 			/* ctime uses static buffer: use separate calls */
-			printf(" %-20.16s", shmseg.shm_atime
-			       ? ctime(&shmseg.shm_atime) + 4 : _("Not set"));
-			printf(" %-20.16s", shmseg.shm_dtime
-			       ? ctime(&shmseg.shm_dtime) + 4 : _("Not set"));
-			printf(" %-20.16s\n", shmseg.shm_ctime
-			       ? ctime(&shmseg.shm_ctime) + 4 : _("Not set"));
+			printf(" %-20.16s", shmdsp->shm_atim
+			       ? ctime(&shmdsp->shm_atim) + 4 : _("Not set"));
+			printf(" %-20.16s", shmdsp->shm_dtim
+			       ? ctime(&shmdsp->shm_dtim) + 4 : _("Not set"));
+			printf(" %-20.16s\n", shmdsp->shm_ctim
+			       ? ctime(&shmdsp->shm_ctim) + 4 : _("Not set"));
 			break;
 		case PID:
 			if (pw)
-				printf ("%-10d %-10.10s", shmid, pw->pw_name);
+				printf ("%-10d %-10.10s", shmdsp->shm_perm.id, pw->pw_name);
 			else
-				printf ("%-10d %-10u", shmid, ipcp->uid);
-			printf (" %-10d %-10d\n",
-				shmseg.shm_cpid, shmseg.shm_lpid);
+				printf ("%-10d %-10u", shmdsp->shm_perm.id, shmdsp->shm_perm.uid);
+			printf (" %-10u %-10u\n",
+				shmdsp->shm_cprid, shmdsp->shm_lprid);
 			break;
 
 		default:
-			printf("0x%08x ",ipcp->KEY );
+			printf("0x%08x ", shmdsp->shm_perm.key);
 			if (pw)
-				printf ("%-10d %-10.10s", shmid, pw->pw_name);
+				printf ("%-10d %-10.10s", shmdsp->shm_perm.id, pw->pw_name);
 			else
-				printf ("%-10d %-10u", shmid, ipcp->uid);
-			printf (" %-10o %-10lu %-10ld %-6s %-6s\n",
-				ipcp->mode & 0777,
-				/*
-				 * earlier: int, Austin has size_t
-				 */
-				(unsigned long) shmseg.shm_segsz,
-				/*
-				 * glibc-2.1.3 and earlier has unsigned short;
-				 * Austin has shmatt_t
-				 */
-				(long) shmseg.shm_nattch,
-				ipcp->mode & SHM_DEST ? _("dest") : " ",
-				ipcp->mode & SHM_LOCKED ? _("locked") : " ");
+				printf ("%-10d %-10u", shmdsp->shm_perm.id, shmdsp->shm_perm.uid);
+			printf (" %-10o ", shmdsp->shm_perm.mode & 0777);
+
+			if (unit == IPC_UNIT_HUMAN)
+				ipc_print_size(unit, NULL, shmdsp->shm_segsz, "    ", 6);
+			else
+				ipc_print_size(unit, NULL, shmdsp->shm_segsz, NULL, -10);
+
+			printf (" %-10ld %-6s %-6s\n",
+				shmdsp->shm_nattch,
+				shmdsp->shm_perm.mode & SHM_DEST ? _("dest") : " ",
+				shmdsp->shm_perm.mode & SHM_LOCKED ? _("locked") : " ");
 			break;
 		}
 	}
+
+	ipc_shm_free_info(shmds);
 	return;
 }
 
-void do_sem (char format)
+static void do_sem (char format)
 {
-	int maxid, semid, id;
-	struct semid_ds semary;
-	struct seminfo seminfo;
-	struct ipc_perm *ipcp = &semary.sem_perm;
 	struct passwd *pw;
-	union semun arg;
-
-	arg.array = (ushort *)  (void *) &seminfo;
-	maxid = semctl (0, 0, SEM_INFO, arg);
-	if (maxid < 0) {
-		printf (_("kernel not configured for semaphores\n"));
-		return;
-	}
+	struct sem_data *semds, *semdsp;
 
 	switch (format) {
 	case LIMITS:
-		printf (_("------ Semaphore Limits --------\n"));
-		arg.array = (ushort *) (void *) &seminfo; /* damn union */
-		if ((semctl (0, 0, IPC_INFO, arg)) < 0 )
-			return;
-		printf (_("max number of arrays = %d\n"), seminfo.semmni);
-		printf (_("max semaphores per array = %d\n"), seminfo.semmsl);
-		printf (_("max semaphores system wide = %d\n"), seminfo.semmns);
-		printf (_("max ops per semop call = %d\n"), seminfo.semopm);
-		printf (_("semaphore max value = %d\n"), seminfo.semvmx);
-		return;
+	{
+		struct ipc_limits lim;
 
+		printf (_("------ Semaphore Limits --------\n"));
+		if (ipc_sem_get_limits(&lim))
+			return;
+		printf (_("max number of arrays = %d\n"), lim.semmni);
+		printf (_("max semaphores per array = %d\n"), lim.semmsl);
+		printf (_("max semaphores system wide = %d\n"), lim.semmns);
+		printf (_("max ops per semop call = %d\n"), lim.semopm);
+		printf (_("semaphore max value = %d\n"), lim.semvmx);
+		return;
+	}
 	case STATUS:
+	{
+		struct seminfo seminfo;
+		union semun arg;
+		arg.array = (ushort *)  (void *) &seminfo;
+		if (semctl (0, 0, SEM_INFO, arg) < 0) {
+			printf (_("kernel not configured for semaphores\n"));
+			return;
+		}
 		printf (_("------ Semaphore Status --------\n"));
 		printf (_("used arrays = %d\n"), seminfo.semusz);
 		printf (_("allocated semaphores = %d\n"), seminfo.semaem);
 		return;
+	}
 
 	case CREATOR:
 		printf (_("------ Semaphore Arrays Creators/Owners --------\n"));
@@ -464,81 +388,84 @@ void do_sem (char format)
 		break;
 	}
 
-	for (id = 0; id <= maxid; id++) {
-		arg.buf = (struct semid_ds *) &semary;
-		semid = semctl (id, 0, SEM_STAT, arg);
-		if (semid < 0)
-			continue;
+	/*
+	 * Print data
+	 */
+	if (ipc_sem_get_info(-1, &semds) < 1)
+		return;
+	semdsp = semds;
+
+	for (semdsp = semds; semdsp->next != NULL; semdsp = semdsp->next) {
 		if (format == CREATOR)  {
-			print_perms (semid, ipcp);
+			ipc_print_perms(stdout, &semdsp->sem_perm);
 			continue;
 		}
-		pw = getpwuid(ipcp->uid);
+		pw = getpwuid(semdsp->sem_perm.uid);
 		switch (format) {
 		case TIME:
 			if (pw)
-				printf ("%-8d %-10.10s", semid, pw->pw_name);
+				printf ("%-8d %-10.10s", semdsp->sem_perm.id, pw->pw_name);
 			else
-				printf ("%-8d %-10u", semid, ipcp->uid);
-			printf ("  %-26.24s", semary.sem_otime
-				? ctime(&semary.sem_otime) : _("Not set"));
-			printf (" %-26.24s\n", semary.sem_ctime
-				? ctime(&semary.sem_ctime) : _("Not set"));
+				printf ("%-8d %-10u", semdsp->sem_perm.id, semdsp->sem_perm.uid);
+			printf ("  %-26.24s", semdsp->sem_otime
+				? ctime(&semdsp->sem_otime) : _("Not set"));
+			printf (" %-26.24s\n", semdsp->sem_ctime
+				? ctime(&semdsp->sem_ctime) : _("Not set"));
 			break;
 		case PID:
 			break;
 
 		default:
-			printf("0x%08x ", ipcp->KEY);
+			printf("0x%08x ", semdsp->sem_perm.key);
 			if (pw)
-				printf ("%-10d %-10.10s", semid, pw->pw_name);
+				printf ("%-10d %-10.10s", semdsp->sem_perm.id, pw->pw_name);
 			else
-				printf ("%-10d %-10u", semid, ipcp->uid);
+				printf ("%-10d %-10u", semdsp->sem_perm.id, semdsp->sem_perm.uid);
 			printf (" %-10o %-10ld\n",
-				ipcp->mode & 0777,
-				/*
-				 * glibc-2.1.3 and earlier has unsigned
-				 * short. glibc-2.1.91 has variation between
-				 * unsigned short and unsigned long. Austin
-				 * prescribes unsigned short.
-				 */
-				(long) semary.sem_nsems);
+				semdsp->sem_perm.mode & 0777,
+				semdsp->sem_nsems);
 			break;
 		}
 	}
+
+	ipc_sem_free_info(semds);
+	return;
 }
 
-void do_msg (char format)
+static void do_msg (char format, int unit)
 {
-	int maxid, msqid, id;
-	struct msqid_ds msgque;
-	struct msginfo msginfo;
-	struct ipc_perm *ipcp = &msgque.msg_perm;
 	struct passwd *pw;
-
-	maxid = msgctl (0, MSG_INFO, (struct msqid_ds *) (void *) &msginfo);
-	if (maxid < 0) {
-		printf (_("kernel not configured for message queues\n"));
-		return;
-	}
+	struct msg_data *msgds, *msgdsp;
 
 	switch (format) {
 	case LIMITS:
-		if ((msgctl (0, IPC_INFO, (struct msqid_ds *) (void *) &msginfo)) < 0 )
+	{
+		struct ipc_limits lim;
+
+		if (ipc_msg_get_limits(&lim))
 			return;
 		printf (_("------ Messages Limits --------\n"));
-		printf (_("max queues system wide = %d\n"), msginfo.msgmni);
-		printf (_("max size of message (bytes) = %d\n"), msginfo.msgmax);
-		printf (_("default max size of queue (bytes) = %d\n"), msginfo.msgmnb);
+		printf (_("max queues system wide = %d\n"), lim.msgmni);
+		ipc_print_size(unit == IPC_UNIT_DEFAULT ? IPC_UNIT_BYTES : unit,
+			       _("max size of message"), lim.msgmax, "\n", 0);
+		ipc_print_size(unit == IPC_UNIT_DEFAULT ? IPC_UNIT_BYTES : unit,
+			       _("default max size of queue"), lim.msgmnb, "\n", 0);
 		return;
-
+	}
 	case STATUS:
+	{
+		struct msginfo msginfo;
+		if (msgctl (0, MSG_INFO, (struct msqid_ds *) (void *) &msginfo) < 0) {
+			printf (_("kernel not configured for message queues\n"));
+			return;
+		}
 		printf (_("------ Messages Status --------\n"));
 		printf (_("allocated queues = %d\n"), msginfo.msgpool);
 		printf (_("used headers = %d\n"), msginfo.msgmap);
-		printf (_("used space = %d bytes\n"), msginfo.msgtql);
+		ipc_print_size(unit, _("used space ="), msginfo.msgtql,
+			       unit == IPC_UNIT_DEFAULT ? _(" bytes\n") : "\n", 0);
 		return;
-
+	}
 	case CREATOR:
 		printf (_("------ Message Queues Creators/Owners --------\n"));
 		printf ("%-10s %-10s %-10s %-10s %-10s %-10s\n",
@@ -561,154 +488,159 @@ void do_msg (char format)
 		printf (_("------ Message Queues --------\n"));
 		printf ("%-10s %-10s %-10s %-10s %-12s %-12s\n",
 			_("key"), _("msqid"), _("owner"), _("perms"),
-			_("used-bytes"), _("messages"));
+			unit == IPC_UNIT_HUMAN ? _("size") : _("used-bytes"),
+			_("messages"));
 		break;
 	}
 
-	for (id = 0; id <= maxid; id++) {
-		msqid = msgctl (id, MSG_STAT, &msgque);
-		if (msqid < 0)
-			continue;
-		if (format == CREATOR)  {
-			print_perms (msqid, ipcp);
+	/*
+	 * Print data
+	 */
+	if (ipc_msg_get_info(-1, &msgds) < 1)
+		return;
+	msgdsp = msgds;
+
+	for (msgdsp = msgds; msgdsp->next != NULL; msgdsp = msgdsp->next) {
+		if (format == CREATOR) {
+			ipc_print_perms(stdout, &msgdsp->msg_perm);
 			continue;
 		}
-		pw = getpwuid(ipcp->uid);
+		pw = getpwuid(msgdsp->msg_perm.uid);
 		switch (format) {
 		case TIME:
 			if (pw)
-				printf ("%-8d %-10.10s", msqid, pw->pw_name);
+				printf ("%-8d %-10.10s", msgdsp->msg_perm.id, pw->pw_name);
 			else
-				printf ("%-8d %-10u", msqid, ipcp->uid);
-			printf (" %-20.16s", msgque.msg_stime
-				? ctime(&msgque.msg_stime) + 4 : _("Not set"));
-			printf (" %-20.16s", msgque.msg_rtime
-				? ctime(&msgque.msg_rtime) + 4 : _("Not set"));
-			printf (" %-20.16s\n", msgque.msg_ctime
-				? ctime(&msgque.msg_ctime) + 4 : _("Not set"));
+				printf ("%-8d %-10u", msgdsp->msg_perm.id, msgdsp->msg_perm.uid);
+			printf (" %-20.16s", msgdsp->q_stime
+				? ctime(&msgdsp->q_stime) + 4 : _("Not set"));
+			printf (" %-20.16s", msgdsp->q_rtime
+				? ctime(&msgdsp->q_rtime) + 4 : _("Not set"));
+			printf (" %-20.16s\n", msgdsp->q_ctime
+				? ctime(&msgdsp->q_ctime) + 4 : _("Not set"));
 			break;
 		case PID:
 			if (pw)
-				printf ("%-8d %-10.10s", msqid, pw->pw_name);
+				printf ("%-8d %-10.10s", msgdsp->msg_perm.id, pw->pw_name);
 			else
-				printf ("%-8d %-10u", msqid, ipcp->uid);
+				printf ("%-8d %-10u", msgdsp->msg_perm.id, msgdsp->msg_perm.uid);
 			printf ("  %5d     %5d\n",
-				msgque.msg_lspid, msgque.msg_lrpid);
+				msgdsp->q_lspid, msgdsp->q_lrpid);
 			break;
 
 		default:
-			printf( "0x%08x ",ipcp->KEY );
+			printf( "0x%08x ",msgdsp->msg_perm.key );
 			if (pw)
-				printf ("%-10d %-10.10s", msqid, pw->pw_name);
+				printf ("%-10d %-10.10s", msgdsp->msg_perm.id, pw->pw_name);
 			else
-				printf ("%-10d %-10u", msqid, ipcp->uid);
-			printf (" %-10o %-12ld %-12ld\n",
-				ipcp->mode & 0777,
-				/*
-				 * glibc-2.1.3 and earlier has unsigned
-				 * short. glibc-2.1.91 has variation between
-				 * unsigned short, unsigned long. Austin has
-				 * msgqnum_t
-				 */
-				(long) msgque.msg_cbytes,
-				(long) msgque.msg_qnum);
+				printf ("%-10d %-10u", msgdsp->msg_perm.id, msgdsp->msg_perm.uid);
+			printf (" %-10o ", msgdsp->msg_perm.mode & 0777);
+
+			if (unit == IPC_UNIT_HUMAN)
+				ipc_print_size(unit, NULL, msgdsp->q_cbytes, "      ", 6);
+			else
+				ipc_print_size(unit, NULL, msgdsp->q_cbytes, NULL, -12);
+
+			printf (" %-12ld\n", msgdsp->q_qnum);
 			break;
 		}
 	}
+
+	ipc_msg_free_info(msgds);
 	return;
 }
 
-void print_shm (int shmid)
+static void print_shm(int shmid, int unit)
 {
-	struct shmid_ds shmds;
-	struct ipc_perm *ipcp = &shmds.shm_perm;
+	struct shm_data *shmdata;
 
-	if (shmctl (shmid, IPC_STAT, &shmds) == -1)
-		err(EXIT_FAILURE, _("shmctl failed"));
+	if (ipc_shm_get_info(shmid, &shmdata) < 1) {
+		warnx(_("id %d not found"), shmid);
+		return;
+	}
 
-	printf (_("\nShared memory Segment shmid=%d\n"), shmid);
-	printf (_("uid=%u\tgid=%u\tcuid=%u\tcgid=%u\n"),
-		ipcp->uid, ipcp->gid, ipcp->cuid, ipcp->cgid);
-	printf (_("mode=%#o\taccess_perms=%#o\n"),
-		ipcp->mode, ipcp->mode & 0777);
-	printf (_("bytes=%lu\tlpid=%d\tcpid=%d\tnattch=%ld\n"),
-		(unsigned long) shmds.shm_segsz, shmds.shm_lpid, shmds.shm_cpid,
-		(long) shmds.shm_nattch);
-	printf (_("att_time=%-26.24s\n"),
-		shmds.shm_atime ? ctime (&shmds.shm_atime) : _("Not set"));
-	printf (_("det_time=%-26.24s\n"),
-		shmds.shm_dtime ? ctime (&shmds.shm_dtime) : _("Not set"));
-	printf (_("change_time=%-26.24s\n"), ctime (&shmds.shm_ctime));
-	printf ("\n");
-	return;
+	printf(_("\nShared memory Segment shmid=%d\n"), shmid);
+	printf(_("uid=%u\tgid=%u\tcuid=%u\tcgid=%u\n"),
+	       shmdata->shm_perm.uid, shmdata->shm_perm.uid,
+	       shmdata->shm_perm.cuid, shmdata->shm_perm.cgid);
+	printf(_("mode=%#o\taccess_perms=%#o\n"), shmdata->shm_perm.mode,
+	       shmdata->shm_perm.mode & 0777);
+	ipc_print_size(unit, unit == IPC_UNIT_HUMAN ? _("size=") : _("bytes="),
+		       shmdata->shm_segsz, "\t", 0);
+	printf(_("lpid=%u\tcpid=%u\tnattch=%jd\n"),
+	       shmdata->shm_lprid, shmdata->shm_cprid,
+	       shmdata->shm_nattch);
+	printf(_("att_time=%-26.24s\n"),
+	       shmdata->shm_atim ? ctime(&(shmdata->shm_atim)) : _("Not set"));
+	printf(_("det_time=%-26.24s\n"),
+	       shmdata->shm_dtim ? ctime(&shmdata->shm_dtim) : _("Not set"));
+	printf(_("change_time=%-26.24s\n"), ctime(&shmdata->shm_ctim));
+	printf("\n");
+
+	ipc_shm_free_info(shmdata);
 }
 
-
-void print_msg (int msqid)
+void print_msg(int msgid, int unit)
 {
-	struct msqid_ds buf;
-	struct ipc_perm *ipcp = &buf.msg_perm;
+	struct msg_data *msgdata;
 
-	if (msgctl (msqid, IPC_STAT, &buf) == -1)
-		err(EXIT_FAILURE, _("msgctl failed"));
+	if (ipc_msg_get_info(msgid, &msgdata) < 1) {
+		warnx(_("id %d not found"), msgid);
+		return;
+	}
 
-	printf (_("\nMessage Queue msqid=%d\n"), msqid);
-	printf (_("uid=%u\tgid=%u\tcuid=%u\tcgid=%u\tmode=%#o\n"),
-		ipcp->uid, ipcp->gid, ipcp->cuid, ipcp->cgid, ipcp->mode);
-	printf (_("cbytes=%ld\tqbytes=%ld\tqnum=%ld\tlspid=%d\tlrpid=%d\n"),
-		/*
-		 * glibc-2.1.3 and earlier has unsigned short. glibc-2.1.91
-		 * has variation between unsigned short, unsigned long.
-		 * Austin has msgqnum_t (for msg_qbytes)
-		 */
-		(long) buf.msg_cbytes, (long) buf.msg_qbytes,
-		(long) buf.msg_qnum, buf.msg_lspid, buf.msg_lrpid);
-	printf (_("send_time=%-26.24s\n"),
-		buf.msg_stime ? ctime (&buf.msg_stime) : _("Not set"));
-	printf (_("rcv_time=%-26.24s\n"),
-		buf.msg_rtime ? ctime (&buf.msg_rtime) : _("Not set"));
-	printf (_("change_time=%-26.24s\n"),
-		buf.msg_ctime ? ctime (&buf.msg_ctime) : _("Not set"));
-	printf ("\n");
-	return;
+	printf(_("\nMessage Queue msqid=%d\n"), msgid);
+	printf(_("uid=%u\tgid=%u\tcuid=%u\tcgid=%u\tmode=%#o\n"),
+	       msgdata->msg_perm.uid, msgdata->msg_perm.uid,
+	       msgdata->msg_perm.cuid, msgdata->msg_perm.cgid,
+	       msgdata->msg_perm.mode);
+	ipc_print_size(unit, unit == IPC_UNIT_HUMAN ? _("csize=") : _("cbytes="),
+		       msgdata->q_cbytes, "\t", 0);
+	ipc_print_size(unit, unit == IPC_UNIT_HUMAN ? _("qsize=") : _("qbytes="),
+		       msgdata->q_qbytes, "\t", 0);
+	printf("qnum=%jd\tlspid=%d\tlrpid=%d\n",
+	       msgdata->q_qnum,
+	       msgdata->q_lspid, msgdata->q_lrpid);
+	printf(_("send_time=%-26.24s\n"),
+	       msgdata->q_stime ? ctime(&msgdata->q_stime) : _("Not set"));
+	printf(_("rcv_time=%-26.24s\n"),
+	       msgdata->q_rtime ? ctime(&msgdata->q_rtime) : _("Not set"));
+	printf(_("change_time=%-26.24s\n"),
+	       msgdata->q_ctime ? ctime(&msgdata->q_ctime) : _("Not set"));
+	printf("\n");
+
+	ipc_msg_free_info(msgdata);
 }
 
-void print_sem (int semid)
+static void print_sem(int semid)
 {
-	struct semid_ds semds;
-	struct ipc_perm *ipcp = &semds.sem_perm;
-	union semun arg;
+	struct sem_data *semdata;
 	size_t i;
 
-	arg.buf = &semds;
-	if (semctl (semid, 0, IPC_STAT, arg) < 0)
-		err(EXIT_FAILURE, _("semctl failed"));
-
-	printf (_("\nSemaphore Array semid=%d\n"), semid);
-	printf (_("uid=%u\t gid=%u\t cuid=%u\t cgid=%u\n"),
-		ipcp->uid, ipcp->gid, ipcp->cuid, ipcp->cgid);
-	printf (_("mode=%#o, access_perms=%#o\n"),
-		ipcp->mode, ipcp->mode & 0777);
-	printf (_("nsems = %ld\n"), (long) semds.sem_nsems);
-	printf (_("otime = %-26.24s\n"),
-		semds.sem_otime ? ctime (&semds.sem_otime) : _("Not set"));
-	printf (_("ctime = %-26.24s\n"), ctime (&semds.sem_ctime));
-
-	printf ("%-10s %-10s %-10s %-10s %-10s\n",
-		_("semnum"),_("value"),_("ncount"),_("zcount"),_("pid"));
-	arg.val = 0;
-	for (i=0; i< semds.sem_nsems; i++) {
-		int val, ncnt, zcnt, pid;
-		val = semctl (semid, i, GETVAL, arg);
-		ncnt = semctl (semid, i, GETNCNT, arg);
-		zcnt = semctl (semid, i, GETZCNT, arg);
-		pid = semctl (semid, i, GETPID, arg);
-		if (val < 0 || ncnt < 0 || zcnt < 0 || pid < 0)
-			err(EXIT_FAILURE, _("semctl failed"));
-
-		printf ("%-10zd %-10d %-10d %-10d %-10d\n",
-			i, val, ncnt, zcnt, pid);
+	if (ipc_sem_get_info(semid, &semdata) < 1) {
+		warnx(_("id %d not found"), semid);
+		return;
 	}
-	printf ("\n");
-	return;
+
+	printf(_("\nSemaphore Array semid=%d\n"), semid);
+	printf(_("uid=%u\t gid=%u\t cuid=%u\t cgid=%u\n"),
+	       semdata->sem_perm.uid, semdata->sem_perm.uid,
+	       semdata->sem_perm.cuid, semdata->sem_perm.cgid);
+	printf(_("mode=%#o, access_perms=%#o\n"),
+	       semdata->sem_perm.mode, semdata->sem_perm.mode & 0777);
+	printf(_("nsems = %ld\n"), semdata->sem_nsems);
+	printf(_("otime = %-26.24s\n"),
+	       semdata->sem_otime ? ctime(&semdata->sem_otime) : _("Not set"));
+	printf(_("ctime = %-26.24s\n"), ctime(&semdata->sem_ctime));
+
+	printf("%-10s %-10s %-10s %-10s %-10s\n",
+	       _("semnum"), _("value"), _("ncount"), _("zcount"), _("pid"));
+
+	for (i = 0; i < semdata->sem_nsems; i++) {
+		struct sem_elem *e = &semdata->elements[i];
+		printf("%-10zd %-10d %-10d %-10d %-10d\n",
+		       i, e->semval, e->ncount, e->zcount, e->pid);
+	}
+	printf("\n");
+	ipc_sem_free_info(semdata);
 }

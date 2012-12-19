@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2011 SuSE LINUX Products GmbH, All rights reserved.
  * Copyright (C) 2012 Karel Zak <kzak@redhat.com>
+ * Copyright (C) 2012 Werner Fink <werner@suse.de>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,6 +39,16 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#ifdef USE_SULOGIN_EMERGENCY_MOUNT
+# include <sys/mount.h>
+# include <linux/fs.h>
+# include <linux/magic.h>
+# include <linux/major.h>
+# ifndef MNT_DETACH
+#  define MNT_DETACH   2
+# endif
+#endif
+
 #include "c.h"
 #include "canonicalize.h"
 #include "consoles.h"
@@ -56,6 +67,7 @@
 #endif
 
 #define alignof(type)		((sizeof(type)+(sizeof(void*)-1)) & ~(sizeof(void*)-1))
+#define strsize(string)		(strlen((string))+1)
 
 static int consoles_debug;
 #define DBG(x)	do { \
@@ -74,6 +86,64 @@ dbgprint(const char *mesg, ...)
 	va_end(ap);
 	fputc('\n', stderr);
 }
+
+#ifdef USE_SULOGIN_EMERGENCY_MOUNT
+/*
+ * Make C library standard calls such like ttyname(3) work
+ * even if the system does not show any of the standard
+ * directories.
+ */
+
+static uint32_t emergency_flags;
+# define MNT_PROCFS    0x0001
+# define MNT_DEVTMPFS  0x0002
+
+static __attribute__((__destructor__))
+void emergency_do_umounts(void)
+{
+	if (emergency_flags & MNT_DEVTMPFS)
+		umount2("/dev", MNT_DETACH);
+	if (emergency_flags & MNT_PROCFS)
+		umount2("/proc", MNT_DETACH);
+}
+
+static __attribute__((__constructor__))
+void emergency_do_mounts(void)
+{
+	struct stat rt, xt;
+
+	if (emergency_flags) {
+		emergency_flags = 0;
+		return;
+	}
+
+	if (stat("/", &rt) != 0) {
+		warn("can not get file status of root file system\n");
+		return;
+	}
+
+	if (stat("/proc", &xt) == 0
+	    && rt.st_dev == xt.st_dev
+	    && mount("proc", "/proc", "proc", MS_RELATIME, NULL) == 0)
+		emergency_flags |= MNT_PROCFS;
+
+	if (stat("/dev", &xt) == 0
+	    && rt.st_dev == xt.st_dev
+	    && mount("devtmpfs", "/dev", "devtmpfs",
+		     MS_RELATIME, "mode=0755,nr_inodes=0") == 0) {
+
+		emergency_flags |= MNT_DEVTMPFS;
+		mknod("/dev/console", S_IFCHR|S_IRUSR|S_IWUSR,
+					makedev(TTYAUX_MAJOR, 1));
+
+		if (symlink("/proc/self/fd", "/dev/fd") == 0) {
+			ignore_result( symlink("fd/0", "/dev/stdin") );
+			ignore_result( symlink("fd/1", "/dev/stdout") );
+			ignore_result( symlink("fd/2", "/dev/stderr") );
+		}
+	}
+}
+#endif /* USE_SULOGIN_EMERGENCY_MOUNT */
 
 /*
  * Read and allocate one line from file,
@@ -180,6 +250,11 @@ char* scandev(DIR *dir, dev_t comparedev)
 			continue;
 		if ((size_t)snprintf(path, sizeof(path), "/dev/%s", dent->d_name) >= sizeof(path))
 			continue;
+#ifdef USE_SULOGIN_EMERGENCY_MOUNT
+		if (emergency_flags & MNT_DEVTMPFS)
+			mknod(path, S_IFCHR|S_IRUSR|S_IWUSR, comparedev);
+#endif
+
 		name = canonicalize_path(path);
 		break;
 	}
@@ -200,7 +275,7 @@ static
 #ifdef __GNUC__
 __attribute__((__nonnull__,__hot__))
 #endif
-int append_console(struct console **list, char * name)
+int append_console(struct list_head *consoles, const char *name)
 {
 	static const struct chardata initcp = {
 		.erase	= CERASE,
@@ -209,17 +284,22 @@ int append_console(struct console **list, char * name)
 		.parity = 0
 	};
 	struct console *restrict tail;
-	struct console *last;
+	struct console *last = NULL;
 
 	DBG(dbgprint("appenging %s", name));
 
-	if (posix_memalign((void*)&tail, sizeof(void*), alignof(typeof(struct console))) != 0)
+	if (!list_empty(consoles))
+		last = list_last_entry(consoles, struct console, entry);
+
+	if (posix_memalign((void *) &tail, sizeof(void *),
+			   alignof(struct console) + strsize(name)) != 0)
 		return -ENOMEM;
 
-	for (last = *list; last && last->next; last = last->next);
+	INIT_LIST_HEAD(&tail->entry);
 
-	tail->next = NULL;
-	tail->tty = name;
+	list_add_tail(&tail->entry, consoles);
+	tail->tty = ((char *) tail) + alignof(struct console);
+	strcpy(tail->tty, name);
 
 	tail->file = (FILE*)0;
 	tail->flags = 0;
@@ -228,11 +308,6 @@ int append_console(struct console **list, char * name)
 	tail->pid = 0;
 	memset(&tail->tio, 0, sizeof(tail->tio));
 	memcpy(&tail->cp, &initcp, sizeof(struct chardata));
-
-	if (!last)
-		*list = tail;
-	else
-		last->next = tail;
 
 	return 0;
 }
@@ -245,7 +320,7 @@ int append_console(struct console **list, char * name)
  *	  1	- recoverable error
  *	  2	- detection not available
  */
-static int detect_consoles_from_proc(struct console **consoles)
+static int detect_consoles_from_proc(struct list_head *consoles)
 {
 	char fbuf[16 + 1];
 	DIR *dir = NULL;
@@ -274,11 +349,12 @@ static int detect_consoles_from_proc(struct console **consoles)
 		if (!name)
 			continue;
 		rc = append_console(consoles, name);
+		free(name);
 		if (rc < 0)
 			goto done;
 	}
 
-	rc = *consoles ? 0 : 1;
+	rc = list_empty(consoles) ? 1 : 0;
 done:
 	if (dir)
 		closedir(dir);
@@ -295,7 +371,7 @@ done:
  *	  1	- recoverable error
  *	  2	- detection not available
  */
-static int detect_consoles_from_sysfs(struct console **consoles)
+static int detect_consoles_from_sysfs(struct list_head *consoles)
 {
 	char *attrib = NULL, *words, *token;
 	DIR *dir = NULL;
@@ -335,11 +411,12 @@ static int detect_consoles_from_sysfs(struct console **consoles)
 		if (!name)
 			continue;
 		rc = append_console(consoles, name);
+		free(name);
 		if (rc < 0)
 			goto done;
 	}
 
-	rc = *consoles ? 0 : 1;
+	rc = list_empty(consoles) ? 1 : 0;
 done:
 	free(attrib);
 	if (dir)
@@ -349,7 +426,7 @@ done:
 }
 
 
-static int detect_consoles_from_cmdline(struct console **consoles)
+static int detect_consoles_from_cmdline(struct list_head *consoles)
 {
 	char *cmdline, *words, *token;
 	dev_t comparedev;
@@ -422,11 +499,12 @@ static int detect_consoles_from_cmdline(struct console **consoles)
 		if (!name)
 			continue;
 		rc = append_console(consoles, name);
+		free(name);
 		if (rc < 0)
 			goto done;
 	}
 
-	rc = *consoles ? 0 : 1;
+	rc = list_empty(consoles) ? 1 : 0;
 done:
 	if (dir)
 		closedir(dir);
@@ -435,7 +513,7 @@ done:
 	return rc;
 }
 
-static int detect_consoles_from_tiocgdev(struct console **consoles,
+static int detect_consoles_from_tiocgdev(struct list_head *consoles,
 					int fallback,
 					const char *device)
 {
@@ -445,6 +523,7 @@ static int detect_consoles_from_tiocgdev(struct console **consoles,
 	int rc = 1, fd = -1;
 	dev_t comparedev;
 	DIR *dir = NULL;
+	struct console *console;
 
 	DBG(dbgprint("trying tiocgdev"));
 
@@ -478,12 +557,16 @@ static int detect_consoles_from_tiocgdev(struct console **consoles,
 		}
 	}
 	rc = append_console(consoles, name);
+	free(name);
 	if (rc < 0)
 		goto done;
-	if (*consoles &&  (!device || !*device))
-		(*consoles)->fd = fallback;
-
-	rc = *consoles ? 0 : 1;
+	if (list_empty(consoles)) {
+		rc = 1;
+		goto done;
+	}
+	console = list_last_entry(consoles, struct console, entry);
+	if (console &&  (!device || !*device))
+		console->fd = fallback;
 done:
 	if (fd >= 0)
 		close(fd);
@@ -503,7 +586,7 @@ done:
  * Returns 1 if stdout and stderr should be reconnected and 0
  * otherwise or less than zero on error.
  */
-int detect_consoles(const char *device, int fallback, struct console **consoles)
+int detect_consoles(const char *device, int fallback, struct list_head *consoles)
 {
 	int fd, reconnect = 0, rc;
 	dev_t comparedev = 0;
@@ -581,10 +664,11 @@ int detect_consoles(const char *device, int fallback, struct console **consoles)
 
 		if (name) {
 			rc = append_console(consoles, name);
+			free(name);
 			if (rc < 0)
 				return rc;
 		}
-		if (!*consoles)
+		if (list_empty(consoles))
 			goto fallback;
 
 		DBG(dbgprint("detection success [rc=%d]", reconnect));
@@ -632,7 +716,7 @@ console:
 	if (rc < 0)
 		return rc;		/* fatal error */
 
-	if (*consoles) {
+	if (!list_empty(consoles)) {
 		DBG(dbgprint("detection success [rc=%d]", reconnect));
 		return reconnect;
 	}
@@ -642,6 +726,7 @@ console:
 fallback:
 	if (fallback >= 0) {
 		const char *name;
+		struct console *console;
 
 		if (device && *device != '\0')
 			name = device;
@@ -653,8 +738,11 @@ fallback:
 		rc = append_console(consoles, strdup(name));
 		if (rc < 0)
 			return rc;
-		if (*consoles)
-			(*consoles)->fd = fallback;
+		if (list_empty(consoles))
+			return 1;
+		console = list_last_entry(consoles, struct console, entry);
+		if (console)
+			console->fd = fallback;
 	}
 
 	DBG(dbgprint("detection done by fallback [rc=%d]", reconnect));
@@ -667,7 +755,8 @@ int main(int argc, char *argv[])
 {
 	char *name = NULL;
 	int fd, re;
-	struct console *p, *consoles = NULL;
+	LIST_HEAD(consoles);
+	struct list_head *p;
 
 	if (argc == 2) {
 		name = argv[1];
@@ -682,8 +771,10 @@ int main(int argc, char *argv[])
 
 	re = detect_consoles(name, fd, &consoles);
 
-	for (p = consoles; p; p = p->next)
-		printf("%s: id=%d %s\n", p->tty, p->id, re ? "(reconnect) " : "");
+	list_for_each(p, &consoles) {
+		struct console *c = list_entry(p, struct console, entry);
+		printf("%s: id=%d %s\n", c->tty, c->id, re ? "(reconnect) " : "");
+	}
 
 	return 0;
 }

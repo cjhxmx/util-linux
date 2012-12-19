@@ -60,6 +60,7 @@
 #define NETBSD_PARTITION	0xa9
 #define DKTYPENAMES
 #include "fdiskbsdlabel.h"
+#include "fdiskdoslabel.h"
 
 static int xbsd_delete_part (struct fdisk_context *cxt, int partnum);
 static void xbsd_edit_disklabel (void);
@@ -151,16 +152,17 @@ static int xbsd_write_disklabel (struct fdisk_context *cxt)
 	return 0;
 }
 
-static void xbsd_add_part (struct fdisk_context *cxt,
+static int xbsd_add_part (struct fdisk_context *cxt,
 		int partnum __attribute__((__unused__)),
 		struct fdisk_parttype *t __attribute__((__unused__)))
 {
 	unsigned int begin, end;
 	char mesg[256];
-	int i;
+	int i, rc;
 
-	if (!xbsd_check_new_partition (&i))
-		return;
+	rc = xbsd_check_new_partition(&i);
+	if (rc)
+		return rc;
 
 #if !defined (__alpha__) && !defined (__powerpc__) && !defined (__hppa__)
 	begin = get_start_sect(xbsd_part);
@@ -188,6 +190,8 @@ static void xbsd_add_part (struct fdisk_context *cxt,
 	xbsd_dlabel.d_partitions[i].p_size   = end - begin + 1;
 	xbsd_dlabel.d_partitions[i].p_offset = begin;
 	xbsd_dlabel.d_partitions[i].p_fstype = BSD_FS_UNUSED;
+
+	return 0;
 }
 
 static int xbsd_create_disklabel (struct fdisk_context *cxt)
@@ -305,7 +309,7 @@ bsd_command_prompt (struct fdisk_context *cxt)
 	break;
 #endif
       default:
-	print_menu(MAIN_MENU);
+	print_menu(cxt, MAIN_MENU);
 	break;
     }
   }
@@ -603,7 +607,7 @@ xbsd_check_new_partition (int *i) {
 		if (t == BSD_MAXPARTITIONS) {
 			fprintf (stderr, _("The maximum number of partitions "
 					   "has been created\n"));
-			return 0;
+			return -EINVAL;
 		}
 	}
 
@@ -614,10 +618,10 @@ xbsd_check_new_partition (int *i) {
 
 	if (xbsd_dlabel.d_partitions[*i].p_size != 0) {
 		fprintf (stderr, _("This partition already exists.\n"));
-		return 0;
+		return -EINVAL;
 	}
 
-	return 1;
+	return 0;
 }
 
 static unsigned short
@@ -815,7 +819,7 @@ xbsd_link_part (struct fdisk_context *cxt)
 
   k = get_partition (cxt, 1, partitions);
 
-  if (!xbsd_check_new_partition (&i))
+  if (xbsd_check_new_partition (&i))
     return;
 
   p = get_part_table(k);

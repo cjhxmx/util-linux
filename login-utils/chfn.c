@@ -91,7 +91,6 @@ int main(int argc, char **argv)
 	uid_t uid;
 	struct finfo oldf, newf;
 	int interactive;
-	int status;
 
 	sanitize_env();
 	setlocale(LC_ALL, "");	/* both for messages and for iscntrl() below */
@@ -166,22 +165,22 @@ int main(int argc, char **argv)
 
 		retcode = pam_start("chfn", oldf.username, &conv, &pamh);
 		if (pam_fail_check(pamh, retcode))
-			exit(EXIT_FAILURE);
+			return EXIT_FAILURE;
 
 		retcode = pam_authenticate(pamh, 0);
 		if (pam_fail_check(pamh, retcode))
-			exit(EXIT_FAILURE);
+			return EXIT_FAILURE;
 
 		retcode = pam_acct_mgmt(pamh, 0);
 		if (retcode == PAM_NEW_AUTHTOK_REQD)
 			retcode =
 			    pam_chauthtok(pamh, PAM_CHANGE_EXPIRED_AUTHTOK);
 		if (pam_fail_check(pamh, retcode))
-			exit(EXIT_FAILURE);
+			return EXIT_FAILURE;
 
 		retcode = pam_setcred(pamh, 0);
 		if (pam_fail_check(pamh, retcode))
-			exit(EXIT_FAILURE);
+			return EXIT_FAILURE;
 
 		pam_end(pamh, 0);
 		/* no need to establish a session; this isn't a
@@ -196,8 +195,8 @@ int main(int argc, char **argv)
 		printf(_("Finger information not changed.\n"));
 		return EXIT_SUCCESS;
 	}
-	status = save_new_data(&oldf);
-	return status;
+
+	return save_new_data(&oldf) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 /*
@@ -262,8 +261,8 @@ static int parse_argv(int argc, char *argv[], struct finfo *pinfo)
 		default:
 			usage(stderr);
 		}
-		if (status < 0)
-			exit(status);
+		if (status != 0)
+			exit(EXIT_FAILURE);
 	}
 	/* done parsing arguments.  check for a username. */
 	if (optind < argc) {
@@ -271,7 +270,7 @@ static int parse_argv(int argc, char *argv[], struct finfo *pinfo)
 			usage(stderr);
 		pinfo->username = argv[optind];
 	}
-	return (!info_given);
+	return !info_given;
 }
 
 /*

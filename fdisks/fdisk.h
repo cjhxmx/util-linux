@@ -100,6 +100,20 @@ enum failure {
 typedef unsigned long long sector_t;
 
 /*
+ * Supported partition table types (labels)
+ */
+enum fdisk_labeltype {
+	FDISK_DISKLABEL_DOS = 1,
+	FDISK_DISKLABEL_SUN = 2,
+	FDISK_DISKLABEL_SGI = 4,
+	FDISK_DISKLABEL_AIX = 8,
+	FDISK_DISKLABEL_OSF = 16,
+	FDISK_DISKLABEL_MAC = 32,
+	FDISK_DISKLABEL_GPT = 64,
+	FDISK_DISKLABEL_ANY = -1
+};
+
+/*
  * Partition types
  */
 struct fdisk_parttype {
@@ -142,7 +156,11 @@ struct fdisk_context {
 	unsigned long sector_size;	/* logical size */
 	unsigned long alignment_offset;
 
+	enum fdisk_labeltype disklabel;	/* current disklabel */
+
+	/* alignment */
 	unsigned long grain;		/* alignment unit */
+	sector_t first_lba;		/* recommended begin of the first partition */
 
 	/* geometry */
 	sector_t total_sectors; /* in logical sectors */
@@ -151,6 +169,8 @@ struct fdisk_context {
 	/* label operations and description */
 	const struct fdisk_label *label;
 };
+
+#define fdisk_is_disklabel(c, x) fdisk_dev_is_disklabel(c, FDISK_DISKLABEL_ ## x)
 
 /*
  * Label specific operations
@@ -171,13 +191,15 @@ struct fdisk_label {
 	/* create new disk label */
 	int (*create)(struct fdisk_context *cxt);
 	/* new partition */
-	void (*part_add)(struct fdisk_context *cxt, int partnum, struct fdisk_parttype *t);
+	int (*part_add)(struct fdisk_context *cxt, int partnum, struct fdisk_parttype *t);
 	/* delete partition */
 	int (*part_delete)(struct fdisk_context *cxt, int partnum);
 	/* get partition type */
 	struct fdisk_parttype *(*part_get_type)(struct fdisk_context *cxt, int partnum);
 	/* set partition type */
 	int (*part_set_type)(struct fdisk_context *cxt, int partnum, struct fdisk_parttype *t);
+	/* refresh alignment setting */
+	int (*reset_alignment)(struct fdisk_context *cxt);
 };
 
 /*
@@ -194,6 +216,7 @@ extern const struct fdisk_label gpt_label;
 extern struct fdisk_context *fdisk_new_context_from_filename(const char *fname, int readonly);
 extern int fdisk_dev_has_topology(struct fdisk_context *cxt);
 extern int fdisk_dev_has_disklabel(struct fdisk_context *cxt);
+extern int fdisk_dev_is_disklabel(struct fdisk_context *cxt, enum fdisk_labeltype l);
 extern int fdisk_dev_sectsz_is_default(struct fdisk_context *cxt);
 extern void fdisk_free_context(struct fdisk_context *cxt);
 extern void fdisk_zeroize_firstsector(struct fdisk_context *cxt);
@@ -206,6 +229,7 @@ extern int fdisk_add_partition(struct fdisk_context *cxt, int partnum, struct fd
 extern int fdisk_write_disklabel(struct fdisk_context *cxt);
 extern int fdisk_verify_disklabel(struct fdisk_context *cxt);
 extern int fdisk_create_disklabel(struct fdisk_context *cxt, const char *name);
+extern int fdisk_reset_alignment(struct fdisk_context *cxt);
 extern struct fdisk_parttype *fdisk_get_partition_type(struct fdisk_context *cxt, int partnum);
 extern int fdisk_set_partition_type(struct fdisk_context *cxt, int partnum,
 			     struct fdisk_parttype *t);
@@ -220,6 +244,9 @@ extern struct fdisk_parttype *fdisk_parse_parttype(struct fdisk_context *cxt, co
 extern struct fdisk_parttype *fdisk_new_unknown_parttype(unsigned int type, const char *typestr);
 extern void fdisk_free_parttype(struct fdisk_parttype *type);
 
+extern sector_t fdisk_topology_get_first_lba(struct fdisk_context *cxt);
+extern unsigned long fdisk_topology_get_grain(struct fdisk_context *cxt);
+
 /* prototypes for fdisk.c */
 extern char *line_ptr;
 extern int partitions;
@@ -229,7 +256,6 @@ extern void check_consistency(struct fdisk_context *cxt, struct partition *p, in
 extern void check_alignment(struct fdisk_context *cxt, sector_t lba, int partition);
 extern void check(struct fdisk_context *cxt, int n, unsigned int h, unsigned int s, unsigned int c, unsigned int start);
 
-extern void change_units(struct fdisk_context *cxt);
 extern void fatal(struct fdisk_context *cxt, enum failure why);
 extern int  get_partition(struct fdisk_context *cxt, int warn, int max);
 extern void list_partition_types(struct fdisk_context *cxt);
@@ -241,25 +267,23 @@ extern struct partition *get_part_table(int);
 extern unsigned int read_int(struct fdisk_context *cxt,
 			     unsigned int low, unsigned int dflt,
 			     unsigned int high, unsigned int base, char *mesg);
-extern void print_menu(enum menutype);
+extern void print_menu(struct fdisk_context *cxt, enum menutype menu);
 extern void print_partition_size(struct fdisk_context *cxt, int num, sector_t start, sector_t stop, int sysid);
 
 extern void fill_bounds(sector_t *first, sector_t *last);
 
 extern char *partition_type(struct fdisk_context *cxt, unsigned char type);
-extern void update_units(struct fdisk_context *cxt);
 extern char read_chars(char *mesg);
 extern void set_changed(int);
 extern void set_all_unchanged(void);
 extern int warn_geometry(struct fdisk_context *cxt);
 extern void warn_limits(struct fdisk_context *cxt);
-extern void warn_alignment(struct fdisk_context *cxt);
 extern unsigned int read_int_with_suffix(struct fdisk_context *cxt,
 					 unsigned int low, unsigned int dflt, unsigned int high,
 				  unsigned int base, char *mesg, int *is_suffix_used);
 extern sector_t align_lba(struct fdisk_context *cxt, sector_t lba, int direction);
+extern sector_t align_lba_in_range(struct fdisk_context *cxt, sector_t lba, sector_t start, sector_t stop);
 extern int get_partition_dflt(struct fdisk_context *cxt, int warn, int max, int dflt);
-extern void update_sector_offset(struct fdisk_context *cxt);
 
 #define PLURAL	0
 #define SINGULAR 1
@@ -267,21 +291,7 @@ extern const char * str_units(int);
 
 extern sector_t get_nr_sects(struct partition *p);
 
-/*
- * Supported partition table types (labels)
- */
-enum fdisk_labeltype {
-	DOS_LABEL = 1,
-	SUN_LABEL = 2,
-	SGI_LABEL = 4,
-	AIX_LABEL = 8,
-	OSF_LABEL = 16,
-	MAC_LABEL = 32,
-	GPT_LABEL = 64,
-	ANY_LABEL = -1
-};
-
-extern enum fdisk_labeltype disklabel;
+extern int nowarn;
 extern int MBRbuffer_changed;
 
 /* start_sect and nr_sects are stored little endian on all machines */
@@ -311,18 +321,22 @@ static inline void set_start_sect(struct partition *p, unsigned int start_sect)
 	store4_little_endian(p->start4, start_sect);
 }
 
-static inline void seek_sector(struct fdisk_context *cxt, sector_t secno)
+static inline int seek_sector(struct fdisk_context *cxt, sector_t secno)
 {
 	off_t offset = (off_t) secno * cxt->sector_size;
-	if (lseek(cxt->dev_fd, offset, SEEK_SET) == (off_t) -1)
-		fatal(cxt, unable_to_seek);
+
+	return lseek(cxt->dev_fd, offset, SEEK_SET) == (off_t) -1 ? -errno : 0;
 }
 
-static inline void read_sector(struct fdisk_context *cxt, sector_t secno, unsigned char *buf)
+static inline int read_sector(struct fdisk_context *cxt, sector_t secno, unsigned char *buf)
 {
-	seek_sector(cxt, secno);
-	if (read(cxt->dev_fd, buf, cxt->sector_size) != (ssize_t) cxt->sector_size)
-		fatal(cxt, unable_to_read);
+	int rc = seek_sector(cxt, secno);
+
+	if (rc < 0)
+		return rc;
+
+	return read(cxt->dev_fd, buf, cxt->sector_size) !=
+			(ssize_t) cxt->sector_size ? -errno : 0;
 }
 
 static inline sector_t get_start_sect(struct partition *p)

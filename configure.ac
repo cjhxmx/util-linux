@@ -543,20 +543,16 @@ AC_ARG_WITH([selinux],
 if test "x$with_selinux" = xno; then
   AM_CONDITIONAL(HAVE_SELINUX, false)
 else
-  UL_CHECK_LIB(selinux, getprevcon)
-  case "$with_selinux:$have_selinux" in
-  yes:no) AC_MSG_ERROR([SELinux selected but libselinux not found]);;
-  esac
-fi
+  PKG_CHECK_MODULES([SELINUX], [libselinux >= 2.0],
+	[AC_DEFINE(HAVE_LIBSELINUX, 1, [Define if SELinux is available])
+	 UL_PKG_STATIC([SELINUX_LIBS_STATIC], [libselinux])
+	 AM_CONDITIONAL(HAVE_SELINUX, true)
+	 have_selinux=yes],
+	[have_selinux=no])
 
-if test "x$have_selinux" = xyes; then
-  SELINUX_LIBS="-lselinux -lsepol"
-  SELINUX_LIBS_STATIC="-lselinux -lsepol"
-  old_LDFLAGS="$LDFLAGS"
-  LDFLAGS="$LDFLAGS $SELINUX_LIBS"
-  # This function is missing in old libselinux 1.xx versions
-  AC_CHECK_FUNCS([security_get_initial_context])
-  LDFLAGS="$old_LDFLAGS"
+  case "$with_selinux:$have_selinux" in
+  yes:no) AC_MSG_ERROR([SELinux selected but libselinux not found or too old]);;
+  esac
 fi
 AC_SUBST([SELINUX_LIBS])
 AC_SUBST([SELINUX_LIBS_STATIC])
@@ -675,6 +671,7 @@ AC_ARG_ENABLE([most-builds],
 if test "x$enable_most_builds" = xyes; then
   enable_arch=check
   enable_elvtune=check
+  enable_tunelp=yes
   enable_last=yes
   enable_line=yes
   enable_mesg=yes
@@ -993,6 +990,15 @@ UL_REQUIRES_LINUX([elvtune])
 AM_CONDITIONAL(BUILD_ELVTUNE, test "x$build_elvtune" = xyes)
 
 
+AC_ARG_ENABLE([tunelp],
+  AS_HELP_STRING([--enable-tunelp], [build tunelp]),
+  [], enable_tunelp=no
+)
+UL_BUILD_INIT([tunelp])
+UL_REQUIRES_LINUX([tunelp])
+AM_CONDITIONAL(BUILD_TUNELP, test "x$build_tunelp" = xyes)
+
+
 AC_ARG_ENABLE([kill],
   AS_HELP_STRING([--disable-kill], [do not build kill]),
   [], enable_kill=check
@@ -1299,6 +1305,19 @@ AM_CONDITIONAL(USE_TTY_GROUP, test "x$enable_use_tty_group" = xyes)
 if test "x$enable_use_tty_group" = xyes; then
   AC_DEFINE(USE_TTY_GROUP, 1, [Should wall and write be installed setgid tty?])
 fi
+
+
+AC_ARG_ENABLE([sulogin-emergency-mount],
+  AS_HELP_STRING([--disable-sulogin-emergency-mount],
+		 [do not use emergency mount of /dev and /proc for sulogin]),
+  [], enable_sulogin_emergency_mount=yes
+)
+
+if test "x$enable_sulogin_emergency_mount" = xyes; then
+  AC_DEFINE(USE_SULOGIN_EMERGENCY_MOUNT, 1,
+	    [Should sulogin use a emergency mount of /dev and /proc?])
+fi
+
 
 AC_ARG_ENABLE([makeinstall-chown],
   AS_HELP_STRING([--disable-makeinstall-chown], [do not do chown-like operations during "make install"]),

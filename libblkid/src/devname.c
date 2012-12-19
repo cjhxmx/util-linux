@@ -73,7 +73,7 @@ blkid_dev blkid_get_dev(blkid_cache cache, const char *devname, int flags)
 		if (!dev)
 			return NULL;
 		dev->bid_time = INT_MIN;
-		dev->bid_name = blkid_strdup(devname);
+		dev->bid_name = strdup(devname);
 		dev->bid_cache = cache;
 		list_add_tail(&dev->bid_devs, &cache->bic_devs);
 		cache->bic_flags |= BLKID_BIC_FL_CHANGED;
@@ -199,7 +199,7 @@ static void probe_one(blkid_cache cache, const char *ptname,
 		struct stat st;
 		char device[256];
 
-		sprintf(device, "%s/%s", *dir, ptname);
+		snprintf(device, sizeof(device), "%s/%s", *dir, ptname);
 		if ((dev = blkid_get_dev(cache, device, BLKID_DEV_FIND)) &&
 		    dev->bid_devno == devno)
 			goto set_pri;
@@ -208,7 +208,7 @@ static void probe_one(blkid_cache cache, const char *ptname,
 		    (S_ISBLK(st.st_mode) ||
 		     (S_ISCHR(st.st_mode) && !strncmp(ptname, "ubi", 3))) &&
 		    st.st_rdev == devno) {
-			devname = blkid_strdup(device);
+			devname = strdup(device);
 			goto get_dev;
 		}
 	}
@@ -595,9 +595,11 @@ int blkid_probe_all(blkid_cache cache)
 
 	DBG(DEBUG_PROBE, printf("Begin blkid_probe_all()\n"));
 	ret = probe_all(cache, 0);
-	cache->bic_time = time(0);
-	cache->bic_flags |= BLKID_BIC_FL_PROBED;
-	DBG(DEBUG_PROBE, printf("End blkid_probe_all()\n"));
+	if (ret == 0) {
+		cache->bic_time = time(0);
+		cache->bic_flags |= BLKID_BIC_FL_PROBED;
+	}
+	DBG(DEBUG_PROBE, printf("End blkid_probe_all() [rc=%d]\n", ret));
 	return ret;
 }
 
@@ -615,7 +617,7 @@ int blkid_probe_all_new(blkid_cache cache)
 
 	DBG(DEBUG_PROBE, printf("Begin blkid_probe_all_new()\n"));
 	ret = probe_all(cache, 1);
-	DBG(DEBUG_PROBE, printf("End blkid_probe_all_new()\n"));
+	DBG(DEBUG_PROBE, printf("End blkid_probe_all_new() [rc=%d]\n", ret));
 	return ret;
 }
 
@@ -643,7 +645,7 @@ int blkid_probe_all_removable(blkid_cache cache)
 
 	DBG(DEBUG_PROBE, printf("Begin blkid_probe_all_removable()\n"));
 	ret = probe_all_removable(cache);
-	DBG(DEBUG_PROBE, printf("End blkid_probe_all_removable()\n"));
+	DBG(DEBUG_PROBE, printf("End blkid_probe_all_removable() [rc=%d]\n", ret));
 	return ret;
 }
 

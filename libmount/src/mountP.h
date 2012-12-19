@@ -1,7 +1,7 @@
 /*
  * mountP.h - private library header file
  *
- * Copyright (C) 2008-2009 Karel Zak <kzak@redhat.com>
+ * Copyright (C) 2008-2012 Karel Zak <kzak@redhat.com>
  *
  * This file may be redistributed under the terms of the
  * GNU Lesser General Public License.
@@ -89,7 +89,8 @@ mnt_debug_h(void *handler, const char *mesg, ...)
 {
 	va_list ap;
 
-	fprintf(stderr, "[%p]: ", handler);
+	if (handler)
+		fprintf(stderr, "[%p]: ", handler);
 	va_start(ap, mesg);
 	vfprintf(stderr, mesg, ap);
 	va_end(ap);
@@ -126,14 +127,17 @@ extern int mnt_run_test(struct libmnt_test *tests, int argc, char *argv[]);
 #endif
 
 /* utils.c */
-extern int endswith(const char *s, const char *sx);
-extern int startswith(const char *s, const char *sx);
-
-extern int mnt_is_readonly(const char *path);
+extern int endswith(const char *s, const char *sx)
+			__attribute__((nonnull));
+extern int startswith(const char *s, const char *sx)
+			__attribute__((nonnull));
+extern int mnt_is_readonly(const char *path)
+			__attribute__((nonnull));
 
 extern int mnt_parse_offset(const char *str, size_t len, uintmax_t *res);
 
 extern int mnt_chdir_to_parent(const char *target, char **filename);
+
 extern char *mnt_get_username(const uid_t uid);
 extern int mnt_get_uid(const char *username, uid_t *uid);
 extern int mnt_get_gid(const char *groupname, gid_t *gid);
@@ -141,6 +145,7 @@ extern int mnt_in_group(gid_t gid);
 
 extern char *mnt_get_fs_root(const char *path, const char *mountpoint);
 extern int mnt_open_uniq_filename(const char *filename, char **name);
+
 extern int mnt_has_regular_utab(const char **utab, int *writable);
 extern const char *mnt_get_utab_path(void);
 
@@ -158,7 +163,6 @@ extern struct libmnt_fs *mnt_table_get_fs_root(struct libmnt_table *tb,
                                         struct libmnt_fs *fs,
                                         unsigned long mountflags,
                                         char **fsroot);
-
 /*
  * Generic iterator
  */
@@ -372,7 +376,8 @@ extern int mnt_lock_use_simplelock(struct libmnt_lock *ml, int enable);
 /* optmap.c */
 extern const struct libmnt_optmap *mnt_optmap_get_entry(
 			     struct libmnt_optmap const **maps,
-                             int nmaps, const char *name,
+                             int nmaps,
+			     const char *name,
                              size_t namelen,
 			     const struct libmnt_optmap **mapent);
 
@@ -384,9 +389,12 @@ extern int mnt_optstr_fix_secontext(char **optstr, char *value, size_t valsz, ch
 extern int mnt_optstr_fix_user(char **optstr);
 
 /* fs.c */
-extern struct libmnt_fs *mnt_copy_mtab_fs(const struct libmnt_fs *fs);
-extern int __mnt_fs_set_source_ptr(struct libmnt_fs *fs, char *source);
-extern int __mnt_fs_set_fstype_ptr(struct libmnt_fs *fs, char *fstype);
+extern struct libmnt_fs *mnt_copy_mtab_fs(const struct libmnt_fs *fs)
+			__attribute__((nonnull));
+extern int __mnt_fs_set_source_ptr(struct libmnt_fs *fs, char *source)
+			__attribute__((nonnull(1)));
+extern int __mnt_fs_set_fstype_ptr(struct libmnt_fs *fs, char *fstype)
+			__attribute__((nonnull(1)));
 
 /* context.c */
 extern int mnt_context_prepare_srcpath(struct libmnt_context *cxt);
@@ -401,7 +409,9 @@ extern int mnt_context_update_tabs(struct libmnt_context *cxt);
 extern int mnt_context_umount_setopt(struct libmnt_context *cxt, int c, char *arg);
 extern int mnt_context_mount_setopt(struct libmnt_context *cxt, int c, char *arg);
 
-extern int mnt_context_is_loopdev(struct libmnt_context *cxt);
+extern int mnt_context_is_loopdev(struct libmnt_context *cxt)
+			__attribute__((nonnull));
+
 extern int mnt_context_setup_loopdev(struct libmnt_context *cxt);
 extern int mnt_context_delete_loopdev(struct libmnt_context *cxt);
 extern int mnt_context_clear_loopdev(struct libmnt_context *cxt);
@@ -409,8 +419,8 @@ extern int mnt_context_clear_loopdev(struct libmnt_context *cxt);
 extern int mnt_fork_context(struct libmnt_context *cxt);
 
 extern int mnt_context_set_tabfilter(struct libmnt_context *cxt,
-			int (*fltr)(struct libmnt_fs *, void *),
-			void *data);
+				     int (*fltr)(struct libmnt_fs *, void *),
+				     void *data);
 
 /* tab_update.c */
 extern int mnt_update_set_filename(struct libmnt_update *upd,

@@ -37,30 +37,7 @@
 #include "at.h"
 #include "sysfs.h"
 
-char *blkid_strndup(const char *s, int length)
-{
-	char *ret;
-
-	if (!s)
-		return NULL;
-
-	if (!length)
-		length = strlen(s);
-
-	ret = malloc(length + 1);
-	if (ret) {
-		strncpy(ret, s, length);
-		ret[length] = '\0';
-	}
-	return ret;
-}
-
-char *blkid_strdup(const char *s)
-{
-	return blkid_strndup(s, 0);
-}
-
-char *blkid_strconcat(const char *a, const char *b, const char *c)
+static char *blkid_strconcat(const char *a, const char *b, const char *c)
 {
 	char *res, *p;
 	size_t len, al, bl, cl;
@@ -103,7 +80,8 @@ static void add_to_dirlist(const char *dir, const char *subdir,
 	if (!dp)
 		return;
 	dp->name = subdir ? blkid_strconcat(dir, "/", subdir) :
-			    blkid_strdup(dir);
+		   dir ? strdup(dir) : NULL;
+
 	if (!dp->name) {
 		free(dp);
 		return;
@@ -392,7 +370,9 @@ int main(int argc, char** argv)
 	free(devname);
 
 	printf("Looking for whole-device for 0x%04llx\n", (long long)devno);
-	blkid_devno_to_wholedisk(devno, diskname, sizeof(diskname), &disk_devno);
+	if (blkid_devno_to_wholedisk(devno, diskname,
+				sizeof(diskname), &disk_devno) == 0)
+		printf("found devno 0x%04llx as /dev/%s\n", (long long) disk_devno, diskname);
 
 	return 0;
 }

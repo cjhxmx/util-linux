@@ -142,12 +142,14 @@ int mnt_chdir_to_parent(const char *target, char **filename)
 		"current directory moved to %s [last_component='%s']",
 		parent, last));
 
-	*filename = buf;
+	if (filename) {
+		*filename = buf;
 
-	if (!last || !*last)
-		memcpy(*filename, ".", 2);
-	else
-		memcpy(*filename, last, strlen(last) + 1);
+		if (!last || !*last)
+			memcpy(*filename, ".", 2);
+		else
+			memcpy(*filename, last, strlen(last) + 1);
+	}
 	return 0;
 err:
 	free(buf);
@@ -268,8 +270,6 @@ int mnt_fstype_is_pseudofs(const char *type)
  */
 int mnt_fstype_is_netfs(const char *type)
 {
-	if (!type)
-		return 0;
 	if (strcmp(type, "cifs")   == 0 ||
 	    strcmp(type, "smbfs")  == 0 ||
 	    strncmp(type,"nfs", 3) == 0 ||
@@ -453,7 +453,9 @@ static int get_filesystems(const char *filename, char ***filesystems, const char
 
 	f = fopen(filename, "r");
 	if (!f)
-		return 0;
+		return 1;
+
+	DBG(UTILS, mnt_debug("reading filesystems list from: %s", filename));
 
 	while (fgets(line, sizeof(line), f)) {
 		char name[sizeof(line)];
@@ -462,6 +464,10 @@ static int get_filesystems(const char *filename, char ***filesystems, const char
 			continue;
 		if (sscanf(line, " %128[^\n ]\n", name) != 1)
 			continue;
+		if (strcmp(name, "*") == 0) {
+			rc = 1;
+			break;		/* end of the /etc/filesystems */
+		}
 		if (pattern && !mnt_match_fstype(name, pattern))
 			continue;
 		rc = add_filesystem(filesystems, name);
@@ -474,8 +480,15 @@ static int get_filesystems(const char *filename, char ***filesystems, const char
 }
 
 /*
- * Returns zero also if not found any matching filesystem. Always check
- * @filesystems pointer!
+ * Always check @filesystems pointer!
+ *
+ * man mount:
+ *
+ * ...mount will try to read the file /etc/filesystems, or, if that does not
+ * exist, /proc/filesystems. All of the filesystem  types  listed  there  will
+ * be tried,  except  for  those  that  are  labeled  "nodev"  (e.g.,  devpts,
+ * proc  and  nfs).  If /etc/filesystems ends in a line with a single * only,
+ * mount will read /proc/filesystems after‐ wards.
  */
 int mnt_get_filesystems(char ***filesystems, const char *pattern)
 {
@@ -483,12 +496,18 @@ int mnt_get_filesystems(char ***filesystems, const char *pattern)
 
 	if (!filesystems)
 		return -EINVAL;
+
 	*filesystems = NULL;
 
 	rc = get_filesystems(_PATH_FILESYSTEMS, filesystems, pattern);
-	if (rc)
+	if (rc != 1)
 		return rc;
-	return get_filesystems(_PATH_PROC_FILESYSTEMS, filesystems, pattern);
+
+	rc = get_filesystems(_PATH_PROC_FILESYSTEMS, filesystems, pattern);
+	if (rc == 1 && *filesystems)
+		rc = 0;			/* not found /proc/filesystems */
+
+	return rc;
 }
 
 static size_t get_pw_record_size(void)
@@ -791,9 +810,10 @@ int mnt_open_uniq_filename(const char *filename, char **name)
 {
 	int rc, fd;
 	char *n;
+	mode_t oldmode;
 
-	assert(filename);
-
+	if (!filename)
+		return -EINVAL;
 	if (name)
 		*name = NULL;
 
@@ -801,7 +821,14 @@ int mnt_open_uniq_filename(const char *filename, char **name)
 	if (rc <= 0)
 		return -errno;
 
+	/* This is for very old glibc and for compatibility with Posix where is
+	 * nothing about mkstemp() mode. All sane glibc use secure mode (0600).
+	 */
+	oldmode = umask(S_IRGRP|S_IWGRP|S_IXGRP|
+			S_IROTH|S_IWOTH|S_IXOTH);
 	fd = mkstemp(n);
+	umask(oldmode);
+
 	if (fd >= 0 && name)
 		*name = n;
 	else
@@ -817,7 +844,7 @@ int mnt_open_uniq_filename(const char *filename, char **name)
  * This function finds the mountpoint that a given path resides in. @path
  * should be canonicalized. The returned pointer should be freed by the caller.
  *
- * Returns: target of mounted device or NULL on error
+ * Returns: allocated string with target of the mounted device or NULL on error
  */
 char *mnt_get_mountpoint(const char *path)
 {
@@ -903,11 +930,11 @@ char *mnt_get_kernel_cmdline_option(const char *name)
 	char buf[BUFSIZ];	/* see kernel include/asm-generic/setup.h: COMMAND_LINE_SIZE */
 	const char *path = _PATH_PROC_CMDLINE;
 
-	assert(name);
-	assert(*name);
+	if (!name)
+		return NULL;
 
 #ifdef TEST_PROGRAM
-	path = safe_getenv("LIBMOUNT_KERNEL_CMDLINE");
+	path = getenv("LIBMOUNT_KERNEL_CMDLINE");
 	if (!path)
 		path = _PATH_PROC_CMDLINE;
 #endif
@@ -928,9 +955,7 @@ char *mnt_get_kernel_cmdline_option(const char *name)
 	if (len && *(name + len - 1) == '=')
 		val = 1;
 
-	while (p && *p) {
-		if (p != buf)
-			p++;
+	for ( ; p && *p; p++) {
 		if (!(p = strstr(p, name)))
 			break;			/* not found the option */
 		if (p != buf && !isblank(*(p - 1)))
