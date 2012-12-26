@@ -55,7 +55,7 @@
 #include "pathnames.h"
 #include "strutils.h"
 #include "ttyutils.h"
-#include "consoles.h"
+#include "sulogin-consoles.h"
 #define CONMAX		16
 
 #define BS		CTRL('h')
@@ -833,6 +833,10 @@ int main(int argc, char **argv)
 	mask_signal(SIGTSTP, SIG_IGN, &saved_sigtstp);
 	mask_signal(SIGINT,  SIG_IGN, &saved_sigint);
 	mask_signal(SIGHUP,  SIG_IGN, &saved_sighup);
+
+
+	emergency_do_mounts();
+	atexit( emergency_do_umounts );
 
 	/*
 	 * See if we need to open an other tty device.

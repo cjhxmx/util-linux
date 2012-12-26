@@ -21,6 +21,8 @@
  *
  * Author: Werner Fink <werner@suse.de>
  */
+#ifndef UTIL_LINUX_SULOGIN_CONSOLES_H
+#define UTIL_LINUX_SULOGIN_CONSOLES_H
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -28,12 +30,8 @@
 #include <termios.h>
 #include <list.h>
 
-struct chardata {
-	uint8_t	erase;
-	uint8_t kill;
-	uint8_t eol;
-	uint8_t parity;
-};
+#include "ttyutils.h"
+
 struct console {
 	struct list_head entry;
 	char *tty;
@@ -49,3 +47,8 @@ struct console {
 
 extern int detect_consoles(const char *device, int fallback,
 			   struct list_head *consoles);
+
+extern void emergency_do_umounts(void);
+extern void emergency_do_mounts(void);
+
+#endif /* UTIL_LINUX_SULOGIN_CONSOLES_H */
