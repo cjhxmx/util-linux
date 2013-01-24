@@ -191,6 +191,9 @@ AC_CHECK_HEADERS([ \
 	stdint.h \
 	stdio_ext.h \
 	stdlib.h \
+	endian.h \
+	byteswap.h \
+	sys/endian.h \
 	sys/disk.h \
 	sys/disklabel.h \
 	sys/file.h \
@@ -670,15 +673,17 @@ AC_ARG_ENABLE([most-builds],
 )
 if test "x$enable_most_builds" = xyes; then
   enable_arch=check
+  enable_chfn_chsh=yes
+  enable_chkdupexe=yes
   enable_elvtune=check
-  enable_tunelp=yes
   enable_last=yes
   enable_line=yes
   enable_mesg=yes
-  enable_reset=yes
-  enable_vipw=yes
-  enable_chfn_chsh=yes
   enable_newgrp=yes
+  enable_reset=yes
+  enable_socket_activation=yes
+  enable_tunelp=yes
+  enable_vipw=yes
   enable_write=yes
 fi
 
@@ -862,6 +867,17 @@ if test "x$build_unshare" = xyes; then
   AC_CHECK_FUNCS([unshare])
 fi
 
+AC_ARG_ENABLE([nsenter],
+  AS_HELP_STRING([--disable-nsenter], [do not build nsenter]),
+  [], enable_nsenter=check
+)
+UL_BUILD_INIT([nsenter])
+UL_REQUIRES_LINUX([nsenter])
+UL_REQUIRES_SYSCALL_CHECK([setns], [UL_CHECK_SYSCALL([setns])])
+AM_CONDITIONAL(BUILD_NSENTER, test "x$build_nsenter" = xyes)
+if test "x$build_nsenter" = xyes; then
+  AC_CHECK_FUNCS([setns])
+fi
 
 AC_ARG_ENABLE([arch],
   AS_HELP_STRING([--enable-arch], [do build arch]),
@@ -1308,9 +1324,9 @@ fi
 
 
 AC_ARG_ENABLE([sulogin-emergency-mount],
-  AS_HELP_STRING([--disable-sulogin-emergency-mount],
-		 [do not use emergency mount of /dev and /proc for sulogin]),
-  [], enable_sulogin_emergency_mount=yes
+  AS_HELP_STRING([--enable-sulogin-emergency-mount],
+		 [use emergency mount of /dev and /proc for sulogin]),
+  [], enable_sulogin_emergency_mount=no
 )
 
 if test "x$enable_sulogin_emergency_mount" = xyes; then

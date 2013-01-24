@@ -490,6 +490,41 @@ static int mnt_fs_get_flags(struct libmnt_fs *fs)
 }
 
 /**
+ * mnt_fs_get_propagation:
+ * @fs: mountinfo entry
+ * @flags: returns propagation MS_* flags as present in mountinfo file
+ *
+ * Note that this function set @flags to zero if not found any propagation flag
+ * in mountinfo file. The kernel default is MS_PRIVATE, this flag is not stored
+ * in the mountinfo file.
+ *
+ * Returns: 0 on success or negative number in case of error.
+ */
+int mnt_fs_get_propagation(struct libmnt_fs *fs, unsigned long *flags)
+{
+	if (!fs || !flags)
+		return -EINVAL;
+
+	*flags = 0;
+
+	if (!fs->opt_fields)
+		return 0;
+
+	 /*
+	 * The optional fields format is incompatible with mount options
+	 * ... we have to parse the field here.
+	 */
+	*flags |= strstr(fs->opt_fields, "shared:") ? MS_SHARED : MS_PRIVATE;
+
+	if (strstr(fs->opt_fields, "master:"))
+		*flags |= MS_SLAVE;
+	if (strstr(fs->opt_fields, "unbindable"))
+		*flags |= MS_UNBINDABLE;
+
+	return 0;
+}
+
+/**
  * mnt_fs_is_kernel:
  * @fs: filesystem
  *
@@ -691,6 +726,18 @@ const char *mnt_fs_get_options(struct libmnt_fs *fs)
 	return fs ? fs->optstr : NULL;
 }
 
+/**
+ * mnt_fs_get_optional_fields
+ * @fs: mountinfo entry pointer
+ *
+ * Returns: pointer to string with mountinfo optional fields
+ *          or NULL in case of error.
+ */
+const char *mnt_fs_get_optional_fields(struct libmnt_fs *fs)
+{
+	assert(fs);
+	return fs ? fs->opt_fields : NULL;
+}
 
 /**
  * mnt_fs_set_options:
@@ -1394,6 +1441,8 @@ int mnt_fs_print_debug(struct libmnt_fs *fs, FILE *file)
 		fprintf(file, "FS-opstr: %s\n", mnt_fs_get_fs_options(fs));
 	if (mnt_fs_get_user_options(fs))
 		fprintf(file, "user-optstr: %s\n", mnt_fs_get_user_options(fs));
+	if (mnt_fs_get_optional_fields(fs))
+		fprintf(file, "optional-fields: '%s'\n", mnt_fs_get_optional_fields(fs));
 	if (mnt_fs_get_attributes(fs))
 		fprintf(file, "attributes: %s\n", mnt_fs_get_attributes(fs));
 

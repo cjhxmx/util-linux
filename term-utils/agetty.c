@@ -108,23 +108,26 @@
 #define LOGIN		"login: "
 #define LOGIN_ARGV_MAX	16		/* Numbers of args for login */
 
-/* Some shorthands for control characters. */
-#define CTL(x)		(x ^ 0100)	/* Assumes ASCII dialect */
-#define	CR		CTL('M')	/* carriage return */
-#define	NL		CTL('J')	/* line feed */
-#define	BS		CTL('H')	/* back space */
+//<<<<<<< HEAD
+///* Some shorthands for control characters. */
+//#define CTL(x)		(x ^ 0100)	/* Assumes ASCII dialect */
+//#define	CR		CTL('M')	/* carriage return */
+//#define	NL		CTL('J')	/* line feed */
+//#define	BS		CTL('H')	/* back space */
 #define	BSA             127             /* back space */
-#define	DEL		CTL('?')	/* delete */
-
-/* Defaults for line-editing etc. characters; you may want to change these. */
-#define DEF_ERASE	DEL		/* default erase character */
-#define DEF_INTR	CTL('C')	/* default interrupt character */
-#define DEF_QUIT	CTL('\\')	/* default quit char */
-#define DEF_KILL	CTL('U')	/* default kill char */
-#define DEF_EOF		CTL('D')	/* default EOF char */
-#define DEF_EOL		0
-#define DEF_SWITCH	0		/* default switch char */
-
+//#define	DEL		CTL('?')	/* delete */
+//
+///* Defaults for line-editing etc. characters; you may want to change these. */
+//#define DEF_ERASE	DEL		/* default erase character */
+//#define DEF_INTR	CTL('C')	/* default interrupt character */
+//#define DEF_QUIT	CTL('\\')	/* default quit char */
+//#define DEF_KILL	CTL('U')	/* default kill char */
+//#define DEF_EOF		CTL('D')	/* default EOF char */
+//#define DEF_EOL		0
+//#define DEF_SWITCH	0		/* default switch char */
+//
+//=======
+//>>>>>>> e66ba1bfaf070682e26c1a53e64af1088fea56bc
 /*
  * When multiple baud rates are specified on the command line, the first one
  * we will try is the first one specified.
@@ -181,13 +184,6 @@ struct options {
 
 #define serial_tty_option(opt, flag)	\
 	(((opt)->flags & (F_VCONSOLE|(flag))) == (flag))
-
-/* Initial values for the above. */
-static const struct chardata init_chardata = {
-	.erase = DEF_ERASE,		/* default erase character */
-	.kill  = DEF_KILL,		/* default kill character */
-	.eol   = 13			/* default eol char */
-};
 
 struct Speedtab {
 	long speed;
@@ -373,7 +369,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	chardata = init_chardata;
+	INIT_CHARDATA(&chardata);
 
 	if (options.autolog) {
 		debug("doing auto login\n");
@@ -915,7 +911,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 		 * Linux login(1) will change tty permissions. Use root owner and group
 		 * with permission -rw------- for the period between getty and login.
 		 */
-		if (chown(buf, 0, gid) || chmod(buf, (gid ? 0660 : 0600))) {
+		if (chown(buf, 0, gid) || chmod(buf, (gid ? 0620 : 0600))) {
 			if (errno == EROFS)
 				log_warn("%s: %m", buf);
 			else
@@ -1424,7 +1420,7 @@ static char *get_logname(struct options *op, struct termios *tp, struct chardata
 	};
 
 	/* Initialize kill, erase, parity etc. (also after switching speeds). */
-	*cp = init_chardata;
+	INIT_CHARDATA(cp);
 
 	/*
 	 * Flush pending input (especially important after parsing or switching

@@ -49,6 +49,8 @@ struct libmnt_context *mnt_new_context(void)
 	if (!cxt)
 		return NULL;
 
+	INIT_LIST_HEAD(&cxt->addmounts);
+
 	ruid = getuid();
 	euid = geteuid();
 
@@ -151,6 +153,14 @@ int mnt_reset_context(struct libmnt_context *cxt)
 	cxt->user_mountflags = 0;
 	cxt->mountdata = NULL;
 	cxt->flags = MNT_FL_DEFAULT;
+
+	/* free additional mounts list */
+	while (!list_empty(&cxt->addmounts)) {
+		struct libmnt_addmount *ad = list_entry(cxt->addmounts.next,
+				                  struct libmnt_addmount,
+						  mounts);
+		mnt_free_addmount(ad);
+	}
 
 	mnt_context_reset_status(cxt);
 	mnt_context_set_tabfilter(cxt, NULL, NULL);
@@ -1202,6 +1212,8 @@ int mnt_context_set_mflags(struct libmnt_context *cxt, unsigned long flags)
 int mnt_context_get_mflags(struct libmnt_context *cxt, unsigned long *flags)
 {
 	int rc = 0;
+	struct list_head *p;
+
 	if (!cxt || !flags)
 		return -EINVAL;
 
@@ -1212,6 +1224,14 @@ int mnt_context_get_mflags(struct libmnt_context *cxt, unsigned long *flags)
 			rc = mnt_optstr_get_flags(o, flags,
 				    mnt_get_builtin_optmap(MNT_LINUX_MAP));
 	}
+
+	list_for_each(p, &cxt->addmounts) {
+		struct libmnt_addmount *ad =
+				list_entry(p, struct libmnt_addmount, mounts);
+
+		*flags |= ad->mountflags;
+	}
+
 	if (!rc)
 		*flags |= cxt->mountflags;
 	return rc;
@@ -1308,7 +1328,7 @@ int mnt_context_prepare_srcpath(struct libmnt_context *cxt)
 
 	src = mnt_fs_get_source(cxt->fs);
 
-	if (!src && (cxt->mountflags & MS_PROPAGATION))
+	if (!src && mnt_context_propagation_only(cxt))
 		/* mount --make-{shared,private,...} */
 		return mnt_fs_set_source(cxt->fs, "none");
 
@@ -1348,8 +1368,8 @@ int mnt_context_prepare_srcpath(struct libmnt_context *cxt)
 	if (!path)
 		path = src;
 
-	if ((cxt->mountflags & (MS_BIND | MS_MOVE | MS_PROPAGATION | MS_REMOUNT)) ||
-	    mnt_fs_is_pseudofs(cxt->fs)) {
+	if ((cxt->mountflags & (MS_BIND | MS_MOVE | MS_REMOUNT))
+	    || mnt_fs_is_pseudofs(cxt->fs)) {
 		DBG(CXT, mnt_debug_h(cxt, "REMOUNT/BIND/MOVE/pseudo FS source: %s", path));
 		return rc;
 	}
@@ -1366,6 +1386,47 @@ int mnt_context_prepare_srcpath(struct libmnt_context *cxt)
 	DBG(CXT, mnt_debug_h(cxt, "final srcpath '%s'",
 				mnt_fs_get_source(cxt->fs)));
 	return 0;
+}
+
+/* create a mountpoint if x-mount.mkdir[=<mode>] specified */
+static int mkdir_target(const char *tgt, struct libmnt_fs *fs)
+{
+	char *mstr = NULL;
+	size_t mstr_sz = 0;
+	mode_t mode = 0;
+	struct stat st;
+	int rc;
+
+	assert(tgt);
+	assert(fs);
+
+	if (mnt_optstr_get_option(fs->user_optstr, "x-mount.mkdir", &mstr, &mstr_sz) != 0)
+		return 0;
+	if (stat(tgt, &st) == 0)
+		return 0;
+
+	if (mstr && mstr_sz) {
+		char *end = NULL;
+
+		errno = 0;
+		mode = strtol(mstr, &end, 8);
+
+		if (errno || !end || mstr + mstr_sz != end) {
+			DBG(CXT, mnt_debug("failed to parse mkdir mode '%s'", mstr));
+			return -MNT_ERR_MOUNTOPT;
+		}
+	}
+
+	if (!mode)
+		mode = S_IRWXU |			/* 0755 */
+		       S_IRGRP | S_IXGRP |
+		       S_IROTH | S_IXOTH;
+
+	rc = mkdir_p(tgt, mode);
+	if (rc)
+		DBG(CXT, mnt_debug("mkdir %s failed: %m", tgt));
+
+	return rc;
 }
 
 int mnt_context_prepare_target(struct libmnt_context *cxt)
@@ -1387,6 +1448,17 @@ int mnt_context_prepare_target(struct libmnt_context *cxt)
 	if (!tgt)
 		return 0;
 
+	/* mkdir target */
+	if (cxt->action == MNT_ACT_MOUNT
+	    && !mnt_context_is_restricted(cxt)
+	    && cxt->user_mountflags & MNT_MS_XCOMMENT) {
+
+		rc = mkdir_target(tgt, cxt->fs);
+		if (rc)
+			return rc;	/* mkdir or parse error */
+	}
+
+	/* canonicalize the path */
 	cache = mnt_context_get_cache(cxt);
 	if (cache) {
 		char *path = mnt_resolve_path(tgt, cache);
@@ -1419,7 +1491,8 @@ int mnt_context_guess_fstype(struct libmnt_context *cxt)
 	if (!cxt || !cxt->fs)
 		return -EINVAL;
 
-	if (cxt->mountflags & (MS_BIND | MS_MOVE | MS_PROPAGATION))
+	if ((cxt->mountflags & (MS_BIND | MS_MOVE))
+	    || mnt_context_propagation_only(cxt))
 		goto none;
 
 	type = (char *) mnt_fs_get_fstype(cxt->fs);
@@ -1570,8 +1643,8 @@ int mnt_context_prepare_update(struct libmnt_context *cxt)
 
 	DBG(CXT, mnt_debug_h(cxt, "prepare update"));
 
-	if (cxt->mountflags & MS_PROPAGATION) {
-		DBG(CXT, mnt_debug_h(cxt, "skip update: MS_PROPAGATION"));
+	if (mnt_context_propagation_only(cxt)) {
+		DBG(CXT, mnt_debug_h(cxt, "skip update: only MS_PROPAGATION"));
 		return 0;
 	}
 
@@ -1826,6 +1899,30 @@ int mnt_context_apply_fstab(struct libmnt_context *cxt)
 int mnt_context_tab_applied(struct libmnt_context *cxt)
 {
 	return cxt->flags & MNT_FL_TAB_APPLIED;
+}
+
+/*
+ * This is not public function!
+ *
+ * Returns 1 if *only propagation flags* change is requested.
+ */
+int mnt_context_propagation_only(struct libmnt_context *cxt)
+{
+	assert(cxt);
+	assert(cxt->fs);
+
+	if (cxt->action != MNT_ACT_MOUNT)
+		return 0;
+
+	/* has to be called after context_mount.c: fix_opts() */
+	assert((cxt->flags & MNT_FL_MOUNTOPTS_FIXED));
+
+	/* all propagation mounts are in cxt->addmount */
+	return !list_empty(&cxt->addmounts)
+	       && (cxt->mountflags == 0 || cxt->mountflags == MS_SILENT)
+	       && cxt->fs
+	       && (!cxt->fs->fstype || strcmp(cxt->fs->fstype, "none") == 0)
+	       && (!cxt->fs->source || strcmp(cxt->fs->source, "none") == 0);
 }
 
 /**
@@ -2282,11 +2379,11 @@ int test_mountall(struct libmnt_test *ts, int argc, char *argv[])
 		return -ENOMEM;
 
 	if (argc > 2) {
-		if (!strcmp(argv[idx], "-O")) {
+		if (argv[idx] && !strcmp(argv[idx], "-O")) {
 			mnt_context_set_options_pattern(cxt, argv[idx + 1]);
 			idx += 2;
 		}
-		if (!strcmp(argv[idx], "-t")) {
+		if (argv[idx] && !strcmp(argv[idx], "-t")) {
 			mnt_context_set_fstype_pattern(cxt, argv[idx + 1]);
 			idx += 2;
 		}

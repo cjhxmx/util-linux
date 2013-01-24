@@ -458,14 +458,11 @@ of that mount such that mounts and umounts within any of the mirrors propagate
 to the other mirror. A slave mount receives propagation from its master, but
 any not vice-versa.  A private mount carries no propagation abilities.  A
 unbindable mount is a private mount which cannot be cloned through a bind
-operation. Detailed semantics is documented in Documentation/filesystems/sharedsubtree.txt
+operation. Detailed semantics is documented in
+.B Documentation/filesystems/sharedsubtree.txt
 file in the kernel source tree.
 
-Note that Linux kernel does not allow to change more propagation flags by one
-.BR mount (2)
-syscall and the flags cannot be mixed with another mount options. It means that
-more --make-* options cannot be used together or with another mount options.
-
+Supported operations:
 .RS
 .nf
 .BI "mount --make-shared " mountpoint
@@ -484,6 +481,41 @@ mounts under a given mountpoint.
 .BI "mount --make-rslave " mountpoint
 .BI "mount --make-rprivate " mountpoint
 .BI "mount --make-runbindable " mountpoint
+.fi
+.RE
+
+.BR mount (8)
+.B does not read
+.BR fstab (5)
+when --make-* operation is requested. All necessary information has to be
+specified on command line.
+
+Note that Linux kernel does not allow to change more propagation flags by one
+.BR mount (2)
+syscall and the flags cannot be mixed with another mount options.
+
+Since util-linux 2.23 mount command allows to use more propagation flags
+together and with another mount operations. This feature is EXPERIMENTAL. In
+this case the propagation flags are applied by additional mount(2) syscalls
+after previous successful mount operation. Note that this use case is not
+atomic. The propagation flags is possible to specified in
+.BR fstab (5)
+as mount options
+(private,slave,shared,unbindable,rprivate,rslave,rshared,runbindable).
+
+For example
+.RS
+.nf
+.BI "mount --make-private --make-unbindable /dev/sda1 /A"
+.fi
+.RE
+
+is the same as
+.RS
+.nf
+.BI "mount /dev/sda1 /A"
+.BI "mount --make-private /A"
+.BI "mount --make-unbindable /A"
 .fi
 .RE
 .RE
@@ -1098,6 +1130,20 @@ This option implies the options
 .BR noexec ", " nosuid ", and " nodev
 (unless overridden by subsequent options, as in the option line
 .BR users,exec,dev,suid ).
+.TP
+.B x-*
+All options prefixed with "x-" are interpreted as comments or userspace
+applications specific options. These options are not stored to mtab file, send
+to mount.<type> helpers or
+.B mount(2)
+system call. The suggested format is x-<appname>.<option> (e.g. x-systemd.automount).
+.TP
+.B x-mount.mkdir[=<mode>]
+Allow to make a target directory (mountpoint). The optional argument <mode>
+specifies the file system access mode used for
+.B mkdir (2)
+in octal notation. The default mode is 0755. This functionality is supported
+only for root users.
 
 .SH "FILESYSTEM SPECIFIC MOUNT OPTIONS"
 The following options apply only to certain filesystems.
@@ -1183,8 +1229,13 @@ The debugfs filesystem is a pseudo filesystem, traditionally mounted on
 .IR /sys/kernel/debug .
 .\" or just /debug
 .\" present since 2.6.11
-There are no mount options.
-
+As of kernel version 3.4, debugfs has the following options:
+.TP
+.BI uid= n ", gid=" n
+Set the owner and group of the mountpoint.
+.TP
+.BI mode= value
+Sets the mode of the mountpoint.
 .SH "Mount options for devpts"
 The devpts filesystem is a pseudo filesystem, traditionally mounted on
 .IR /dev/pts .

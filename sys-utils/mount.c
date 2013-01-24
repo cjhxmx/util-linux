@@ -234,7 +234,7 @@ static int mount_all(struct libmnt_context *cxt)
 static void success_message(struct libmnt_context *cxt)
 {
 	unsigned long mflags = 0;
-	const char *tgt, *src;
+	const char *tgt, *src, *pr = program_invocation_short_name;
 
 	if (mnt_context_helper_executed(cxt)
 	    || mnt_context_get_status(cxt) != 1)
@@ -245,13 +245,16 @@ static void success_message(struct libmnt_context *cxt)
 	src = mnt_context_get_source(cxt);
 
 	if (mflags & MS_MOVE)
-		warnx(_("%s moved to %s"), src, tgt);
+		printf(_("%s: %s moved to %s.\n"), pr, src, tgt);
 	else if (mflags & MS_BIND)
-		warnx(_("%s binded on %s"), src, tgt);
-	else if (mflags & MS_PROPAGATION)
-		warnx(_("%s propagation flags changed"), tgt);
-	else
-		warnx(_("%s mounted on %s"), src, tgt);
+		printf(_("%s: %s binded on %s.\n"), pr, src, tgt);
+	else if (mflags & MS_PROPAGATION) {
+		if (src && strcmp(src, "none") != 0 && tgt)
+			printf(_("%s: %s mounted on %s.\n"), pr, src, tgt);
+
+		printf(_("%s: %s propagation flags changed.\n"), pr, tgt);
+	} else
+		printf(_("%s: %s mounted on %s.\n"), pr, src, tgt);
 }
 
 /*
@@ -335,11 +338,14 @@ static int mk_exit_code(struct libmnt_context *cxt, int rc)
 	const char *src = mnt_context_get_source(cxt);
 
 try_readonly:
-	if (mnt_context_helper_executed(cxt))
+	if (mnt_context_helper_executed(cxt)) {
 		/*
 		 * /sbin/mount.<type> called, return status
 		 */
+		if (rc == -MNT_ERR_APPLYFLAGS)
+			warnx(_("WARNING: failed to apply propagation flags"));
 		return mnt_context_get_helper_status(cxt);
+	}
 
 	if (rc == 0 && mnt_context_get_status(cxt) == 1) {
 		/*
@@ -497,7 +503,7 @@ try_readonly:
 	case EINVAL:
 		if (mflags & MS_REMOUNT)
 			warnx(_("%s not mounted or bad option"), tgt);
-		else if (mflags & MS_PROPAGATION)
+		else if (rc == -MNT_ERR_APPLYFLAGS)
 			warnx(_("%s is not mountpoint or bad option"), tgt);
 		else
 			warnx(_("wrong fs type, bad option, bad superblock on %s,\n"
@@ -635,6 +641,12 @@ static void sanitize_paths(struct libmnt_context *cxt)
 	}
 }
 
+static void append_option(struct libmnt_context *cxt, const char *opt)
+{
+	if (mnt_context_append_options(cxt, opt))
+		err(MOUNT_EX_SYSERR, _("failed to append option '%s'"), opt);
+}
+
 static void __attribute__((__noreturn__)) usage(FILE *out)
 {
 	fputs(USAGE_HEADER, out);
@@ -718,6 +730,7 @@ int main(int argc, char **argv)
 	char *srcbuf = NULL;
 	char *types = NULL;
 	unsigned long oper = 0;
+	int propa = 0;
 
 	enum {
 		MOUNT_OPT_SHARED = CHAR_MAX + 1,
@@ -771,12 +784,7 @@ int main(int argc, char **argv)
 	};
 
 	static const ul_excl_t excl[] = {       /* rows and cols in in ASCII order */
-		{ 'B','M','R',			/* bind,move,rbind */
-		   MOUNT_OPT_SHARED,   MOUNT_OPT_SLAVE,
-		   MOUNT_OPT_PRIVATE,  MOUNT_OPT_UNBINDABLE,
-		   MOUNT_OPT_RSHARED,  MOUNT_OPT_RSLAVE,
-		   MOUNT_OPT_RPRIVATE, MOUNT_OPT_RUNBINDABLE },
-
+		{ 'B','M','R' },			/* bind,move,rbind */
 		{ 'L','U', MOUNT_OPT_SOURCE },	/* label,uuid,source */
 		{ 0 }
 	};
@@ -800,7 +808,7 @@ int main(int argc, char **argv)
 
 		/* only few options are allowed for non-root users */
 		if (mnt_context_is_restricted(cxt) &&
-		    !strchr("hlLUVvpris", c) &&
+		    !strchr("hlLUVvprist", c) &&
 		    c != MOUNT_OPT_TARGET &&
 		    c != MOUNT_OPT_SOURCE)
 			exit_non_root(option_to_longopt(c, longopts));
@@ -830,8 +838,7 @@ int main(int argc, char **argv)
 			mnt_context_disable_mtab(cxt, TRUE);
 			break;
 		case 'r':
-			if (mnt_context_append_options(cxt, "ro"))
-				err(MOUNT_EX_SYSERR, _("failed to append options"));
+			append_option(cxt, "ro");
 			readwrite = 0;
 			break;
 		case 'v':
@@ -841,13 +848,11 @@ int main(int argc, char **argv)
 			print_version();
 			break;
 		case 'w':
-			if (mnt_context_append_options(cxt, "rw"))
-				err(MOUNT_EX_SYSERR, _("failed to append options"));
+			append_option(cxt, "rw");
 			readwrite = 1;
 			break;
 		case 'o':
-			if (mnt_context_append_options(cxt, optarg))
-				err(MOUNT_EX_SYSERR, _("failed to append options"));
+			append_option(cxt, optarg);
 			break;
 		case 'O':
 			if (mnt_context_set_options_pattern(cxt, optarg))
@@ -890,28 +895,36 @@ int main(int argc, char **argv)
 			oper |= (MS_BIND | MS_REC);
 			break;
 		case MOUNT_OPT_SHARED:
-			oper |= MS_SHARED;
+			append_option(cxt, "shared");
+			propa = 1;
 			break;
 		case MOUNT_OPT_SLAVE:
-			oper |= MS_SLAVE;
+			append_option(cxt, "slave");
+			propa = 1;
 			break;
 		case MOUNT_OPT_PRIVATE:
-			oper |= MS_PRIVATE;
+			append_option(cxt, "private");
+			propa = 1;
 			break;
 		case MOUNT_OPT_UNBINDABLE:
-			oper |= MS_UNBINDABLE;
+			append_option(cxt, "unbindable");
+			propa = 1;
 			break;
 		case MOUNT_OPT_RSHARED:
-			oper |= (MS_SHARED | MS_REC);
+			append_option(cxt, "rshared");
+			propa = 1;
 			break;
 		case MOUNT_OPT_RSLAVE:
-			oper |= (MS_SLAVE | MS_REC);
+			append_option(cxt, "rslave");
+			propa = 1;
 			break;
 		case MOUNT_OPT_RPRIVATE:
-			oper |= (MS_PRIVATE | MS_REC);
+			append_option(cxt, "rprivate");
+			propa = 1;
 			break;
 		case MOUNT_OPT_RUNBINDABLE:
-			oper |= (MS_UNBINDABLE | MS_REC);
+			append_option(cxt, "runbindable");
+			propa = 1;
 			break;
 		case MOUNT_OPT_TARGET:
 			mnt_context_disable_swapmatch(cxt, 1);
@@ -944,11 +957,16 @@ int main(int argc, char **argv)
 	    !mnt_context_get_target(cxt) &&
 	    !argc &&
 	    !all) {
-		if (oper)
+		if (oper || mnt_context_get_options(cxt))
 			usage(stderr);
 		print_all(cxt, types, show_labels);
 		goto done;
 	}
+
+	/* Non-root users are allowed to use -t to print_all(),
+	   but not to mount */
+	if (mnt_context_is_restricted(cxt) && types)
+		exit_non_root("types");
 
 	if (oper && (types || all || mnt_context_get_source(cxt)))
 		usage(stderr);
@@ -1005,13 +1023,13 @@ int main(int argc, char **argv)
 	if (mnt_context_is_restricted(cxt))
 		sanitize_paths(cxt);
 
-	if (oper) {
-		/* MS_PROPAGATION operations, let's set the mount flags */
+	if (oper)
+		/* BIND/MOVE operations, let's set the mount flags */
 		mnt_context_set_mflags(cxt, oper);
 
-		/* For -make* or --bind is fstab unnecessary */
+	if (oper || propa)
+		/* For --make-* or --bind is fstab unnecessary */
 		mnt_context_set_optsmode(cxt, MNT_OMODE_NOTAB);
-	}
 
 	rc = mnt_context_mount(cxt);
 	rc = mk_exit_code(cxt, rc);

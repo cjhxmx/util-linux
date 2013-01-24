@@ -80,6 +80,9 @@ enum {
 	COL_USEPERC,
 	COL_FSROOT,
 	COL_TID,
+	COL_ID,
+	COL_OPT_FIELDS,
+	COL_PROPAGATION,
 
 	FINDMNT_NCOLUMNS
 };
@@ -122,6 +125,9 @@ static struct colinfo infos[FINDMNT_NCOLUMNS] = {
 	[COL_USEPERC]      = { "USE%",            3, TT_FL_RIGHT, N_("filesystem use percentage") },
 	[COL_FSROOT]       = { "FSROOT",       0.25, TT_FL_NOEXTREMES, N_("filesystem root") },
 	[COL_TID]          = { "TID",             4, TT_FL_RIGHT, N_("task ID") },
+	[COL_ID]           = { "ID",              2, TT_FL_RIGHT, N_("mount ID") },
+	[COL_OPT_FIELDS]   = { "OPT-FIELDS",   0.10, TT_FL_TRUNC, N_("optional mount fields") },
+	[COL_PROPAGATION]  = { "PROPAGATION",  0.10, 0, N_("VFS propagation flags") }
 };
 
 /* global flags */
@@ -139,6 +145,9 @@ static int nactions;
 
 /* libmount cache */
 static struct libmnt_cache *cache;
+
+static int match_func(struct libmnt_fs *fs, void *data __attribute__ ((__unused__)));
+
 
 static int get_column_id(int num)
 {
@@ -438,6 +447,9 @@ static const char *get_data(struct libmnt_fs *fs, int num)
 	case COL_FS_OPTIONS:
 		str = mnt_fs_get_fs_options(fs);
 		break;
+	case COL_OPT_FIELDS:
+		str = mnt_fs_get_optional_fields(fs);
+		break;
 	case COL_UUID:
 		str = get_tag(fs, "UUID");
 		break;
@@ -477,6 +489,35 @@ static const char *get_data(struct libmnt_fs *fs, int num)
 		if (mnt_fs_get_tid(fs)) {
 			xasprintf(&tmp, "%d", mnt_fs_get_tid(fs));
 			str = tmp;
+		}
+		break;
+	case COL_ID:
+		if (mnt_fs_get_id(fs)) {
+			xasprintf(&tmp, "%d", mnt_fs_get_id(fs));
+			str = tmp;
+		}
+		break;
+	case COL_PROPAGATION:
+		if (mnt_fs_is_kernel(fs)) {
+			unsigned long fl = 0;
+			char *n = NULL;
+
+			if (mnt_fs_get_propagation(fs, &fl) != 0)
+				break;
+
+			n = xstrdup((fl & MS_SHARED) ? "shared" : "private");
+
+			if (fl & MS_SLAVE) {
+				xasprintf(&tmp, "%s,slave", n);
+				free(n);
+				n = tmp;
+			}
+			if (fl & MS_UNBINDABLE) {
+				xasprintf(&tmp, "%s,unbindable", n);
+				free(n);
+				n = tmp;
+			}
+			str = n;
 		}
 		break;
 	default:
@@ -601,9 +642,12 @@ static int create_treenode(struct tt *tt, struct libmnt_table *tb,
 	if (!itr)
 		goto leave;
 
-	line = add_line(tt, fs, parent_line);
-	if (!line)
-		goto leave;
+	if ((flags & FL_SUBMOUNTS) || match_func(fs, NULL)) {
+		line = add_line(tt, fs, parent_line);
+		if (!line)
+			goto leave;
+	} else
+		line = parent_line;
 
 	/*
 	 * add all children to the output table
@@ -797,6 +841,10 @@ again:
 	return fs;
 }
 
+/*
+ * Filter out unwanted lines for --list output or top level lines for
+ * --submounts tree output.
+ */
 static int add_matching_lines(struct libmnt_table *tb,
 			      struct tt *tt, int direction)
 {
@@ -1261,8 +1309,10 @@ int main(int argc, char *argv[])
 		/* don't care about submounts if list all mounts */
 		flags &= ~FL_SUBMOUNTS;
 
-	if (!(flags & FL_SUBMOUNTS) &&
-	    (!is_listall_mode() || (flags & FL_FIRSTONLY)))
+	if (!(flags & FL_SUBMOUNTS) && ((flags & FL_FIRSTONLY)
+	    || get_match(COL_TARGET)
+	    || get_match(COL_SOURCE)
+	    || get_match(COL_MAJMIN)))
 		tt_flags &= ~TT_FL_TREE;
 
 	if (!(flags & FL_NOSWAPMATCH) &&
@@ -1297,13 +1347,6 @@ int main(int argc, char *argv[])
 	}
 	mnt_table_set_cache(tb, cache);
 
-	if (tabtype == TABTYPE_KERNEL
-	    && (flags & FL_NOSWAPMATCH)
-	    && get_match(COL_TARGET))
-		/*
-		 * enable extra functionality for target match
-		 */
-		enable_extra_target_match();
 
 	/*
 	 * initialize output formatting (tt.h)
@@ -1340,12 +1383,26 @@ int main(int argc, char *argv[])
 		/* poll mode (accept the first tabfile only) */
 		rc = poll_table(tb, tabfiles ? *tabfiles : _PATH_PROC_MOUNTINFO, timeout, tt, direction);
 
-	} else if ((tt_flags & TT_FL_TREE) && is_listall_mode())
+	} else if ((tt_flags & TT_FL_TREE) && !(flags & FL_SUBMOUNTS)) {
 		/* whole tree */
 		rc = create_treenode(tt, tb, NULL, NULL);
-	else
+	} else {
 		/* whole lits of sub-tree */
 		rc = add_matching_lines(tb, tt, direction);
+
+		if (rc != 0
+		    && tabtype == TABTYPE_KERNEL
+		    && (flags & FL_NOSWAPMATCH)
+		    && get_match(COL_TARGET)) {
+			/*
+			 * Found nothing, maybe the --target is regular file,
+			 * try it again with extra functionality for target
+			 * match
+			 */
+			enable_extra_target_match();
+			rc = add_matching_lines(tb, tt, direction);
+		}
+	}
 
 	/*
 	 * Print the output table for non-poll modes

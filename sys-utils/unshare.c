@@ -28,28 +28,7 @@
 #include "nls.h"
 #include "c.h"
 #include "closestream.h"
-
-#ifndef CLONE_NEWSNS
-# define CLONE_NEWNS 0x00020000
-#endif
-#ifndef CLONE_NEWUTS
-# define CLONE_NEWUTS 0x04000000
-#endif
-#ifndef CLONE_NEWIPC
-# define CLONE_NEWIPC 0x08000000
-#endif
-#ifndef CLONE_NEWNET
-# define CLONE_NEWNET 0x40000000
-#endif
-
-#ifndef HAVE_UNSHARE
-# include <sys/syscall.h>
-
-static int unshare(int flags)
-{
-	return syscall(SYS_unshare, flags);
-}
-#endif
+#include "namespace.h"
 
 static void usage(int status)
 {
@@ -63,7 +42,9 @@ static void usage(int status)
 	fputs(_(" -m, --mount       unshare mounts namespace\n"
 		" -u, --uts         unshare UTS namespace (hostname etc)\n"
 		" -i, --ipc         unshare System V IPC namespace\n"
-		" -n, --net         unshare network namespace\n"), out);
+		" -n, --net         unshare network namespace\n"
+		" -p, --pid         unshare pid namespace\n"
+		" -U, --user        unshare user namespace\n"), out);
 
 	fputs(USAGE_SEPARATOR, out);
 	fputs(USAGE_HELP, out);
@@ -82,6 +63,8 @@ int main(int argc, char *argv[])
 		{ "uts", no_argument, 0, 'u' },
 		{ "ipc", no_argument, 0, 'i' },
 		{ "net", no_argument, 0, 'n' },
+		{ "pid", no_argument, 0, 'p' },
+		{ "user", no_argument, 0, 'U' },
 		{ NULL, 0, 0, 0 }
 	};
 
@@ -94,7 +77,7 @@ int main(int argc, char *argv[])
 	textdomain(PACKAGE);
 	atexit(close_stdout);
 
-	while((c = getopt_long(argc, argv, "hVmuin", longopts, NULL)) != -1) {
+	while((c = getopt_long(argc, argv, "hVmuinpU", longopts, NULL)) != -1) {
 		switch(c) {
 		case 'h':
 			usage(EXIT_SUCCESS);
@@ -113,6 +96,12 @@ int main(int argc, char *argv[])
 		case 'n':
 			unshare_flags |= CLONE_NEWNET;
 			break;
+		case 'p':
+			unshare_flags |= CLONE_NEWPID;
+			break;
+		case 'U':
+			unshare_flags |= CLONE_NEWUSER;
+			break;
 		default:
 			usage(EXIT_FAILURE);
 		}
@@ -123,13 +112,6 @@ int main(int argc, char *argv[])
 
 	if(-1 == unshare(unshare_flags))
 		err(EXIT_FAILURE, _("unshare failed"));
-
-	/* drop potential root euid/egid if we had been setuid'd */
-	if (setgid(getgid()) < 0)
-		err(EXIT_FAILURE, _("cannot set group id"));
-
-	if (setuid(getuid()) < 0)
-		err(EXIT_FAILURE, _("cannot set user id"));
 
 	execvp(argv[optind], argv + optind);
 
