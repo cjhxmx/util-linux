@@ -33,7 +33,7 @@
 
 /* *:aeb */
 
-/* 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+/* 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  */
 
@@ -142,13 +142,13 @@ static void __attribute__ ((__noreturn__)) usage(FILE * out)
 
 	fputs(_("\nOptions:\n"), out);
 	fputs(_(" -f <file>  define search scope\n"
-		" -b         search only binaries\n"
+		" -b         search only for binaries\n"
 		" -B <dirs>  define binaries lookup path\n"
-		" -m         search only manual paths\n"
+		" -m         search only for manuals\n"
 		" -M <dirs>  define man lookup path\n"
-		" -s         search only sources path\n"
+		" -s         search only for sources\n"
 		" -S <dirs>  define sources lookup path\n"
-		" -u         search from unusual entities\n"
+		" -u         search for unusual entries\n"
 		" -V         output version information and exit\n"
 		" -h         display this help and exit\n\n"), out);
 
@@ -304,7 +304,7 @@ findv(char **dirv, int dirc, char *cp)
 static void
 looksrc(char *cp)
 {
-	if (Sflag == 0)
+	if (Sflag == NULL)
 		findv(srcdirs, ARRAY_SIZE(srcdirs)-1, cp);
 	else
 		findv(Sflag, Scnt, cp);
@@ -313,7 +313,7 @@ looksrc(char *cp)
 static void
 lookbin(char *cp)
 {
-	if (Bflag == 0) {
+	if (Bflag == NULL) {
 		findv(bindirs, ARRAY_SIZE(bindirs)-1, cp);
 		while (*pathdir_p)
 			findin(*pathdir_p++, cp);		/* look $PATH */
@@ -324,7 +324,7 @@ lookbin(char *cp)
 static void
 lookman(char *cp)
 {
-	if (Mflag == 0)
+	if (Mflag == NULL)
 		findv(mandirs, ARRAY_SIZE(mandirs)-1, cp);
 	else
 		findv(Mflag, Mcnt, cp);
@@ -464,9 +464,7 @@ main(int argc, char **argv)
 				mflag++;
 				continue;
 			case 'V':
-				printf(_("%s from %s\n"),
-					program_invocation_short_name,
-					PACKAGE_STRING);
+				printf(UTIL_LINUX_VERSION);
 				return EXIT_SUCCESS;
 			case 'h':
 				usage(stdout);

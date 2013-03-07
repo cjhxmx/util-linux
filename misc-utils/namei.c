@@ -13,10 +13,10 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * The original namei(1) was writtent by:
+ * The original namei(1) was written by:
  *	Roger S. Southwick (May 2, 1990)
  *	Steve Tell (March 28, 1991)
- *	Arkadiusz Mikiewicz (1999-02-22)
+ *	Arkadiusz Miśkiewicz (1999-02-22)
  *	Li Zefan (2007-09-10).
  */
 
@@ -463,8 +463,7 @@ main(int argc, char **argv)
 			usage(EXIT_SUCCESS);
 			break;
 		case 'V':
-			printf(_("%s from %s\n"), program_invocation_short_name,
-						  PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			return EXIT_SUCCESS;
 		case 'l':
 			flags |= (NAMEI_OWNERS | NAMEI_MODES | NAMEI_VERTICAL);

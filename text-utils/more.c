@@ -27,7 +27,7 @@
  *	to be more posix and so compile on linux/axp.
  * modified by Kars de Jong <jongk@cs.utwente.nl>
  *	to use terminfo instead of termcap.
- * 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ * 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  *	added Native Language Support
  * 1999-03-19 Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  *	more nls translatable strings
@@ -67,6 +67,10 @@
 #include "closestream.h"
 
 #include <regex.h>
+
+#ifdef TEST_PROGRAM
+# define NON_INTERACTIVE_MORE 1
+#endif
 
 #ifndef XTABS
 # define XTABS	TAB3
@@ -319,8 +323,8 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 		  "  -d        display help instead of ring bell\n"
 		  "  -f        count logical, rather than screen lines\n"
 		  "  -l        suppress pause after form feed\n"
-		  "  -p        suppress scroll, clean screen and display text\n"
-		  "  -c        suppress scroll, display text and clean line ends\n"
+		  "  -p        do not scroll, clean screen and display text\n"
+		  "  -c        do not scroll, display text and clean line ends\n"
 		  "  -u        suppress underlining\n"
 		  "  -s        squeeze multiple blank lines into one\n"
 		  "  -NUM      specify the number of lines per screenful\n"
@@ -564,7 +568,7 @@ void argscan(char *s)
 		case '\t':
 			break;
 		case 'V':
-			printf(_("more (%s)\n"), PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			exit(EXIT_SUCCESS);
 			break;
 		default:
@@ -1759,7 +1763,10 @@ void initterm(void)
 #ifdef do_SIGTTOU
  retry:
 #endif
+
+#ifndef NON_INTERACTIVE_MORE
 	no_tty = tcgetattr(fileno(stdout), &otty);
+#endif
 	if (!no_tty) {
 		docrterase = (otty.c_cc[VERASE] != 255);
 		docrtkill = (otty.c_cc[VKILL] != 255);
@@ -1778,7 +1785,7 @@ void initterm(void)
 			}
 		}
 #endif	/* do_SIGTTOU */
-		if ((term = getenv("TERM")) == 0) {
+		if ((term = getenv("TERM")) == NULL) {
 			dumb++;
 			ul_opt = 0;
 		}
@@ -1849,7 +1856,7 @@ void initterm(void)
 			if ((padstr = my_tgetstr(TERM_PAD_CHAR)) != NULL)
 				PC = *padstr;
 			Home = my_tgetstr(TERM_HOME);
-			if (Home == 0 || *Home == '\0') {
+			if (Home == NULL || *Home == '\0') {
 				if ((cursorm =
 				     my_tgetstr(TERM_CURSOR_ADDRESS)) != NULL) {
 					const char *t =

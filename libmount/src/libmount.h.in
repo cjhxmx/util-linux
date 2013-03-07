@@ -129,6 +129,7 @@ enum {
 #define MNT_ERR_LOOPDEV	     5003	/* loopdev setup failed, errno set by libc */
 #define MNT_ERR_MOUNTOPT     5004	/* failed to parse/use userspace mount options */
 #define MNT_ERR_APPLYFLAGS   5005	/* failed to apply MS_PROPAGATION flags */
+#define MNT_ERR_AMBIFS       5006	/* libblkid detected more filesystems on the device */
 
 #ifndef __GNUC_PREREQ
 # if defined __GNUC__ && defined __GNUC_MINOR__
@@ -764,6 +765,9 @@ extern int mnt_context_do_mount(struct libmnt_context *cxt);
 extern int mnt_context_finalize_mount(struct libmnt_context *cxt);
 
 /* context_umount.c */
+extern int mnt_context_find_umount_fs(struct libmnt_context *cxt,
+			       const char *tgt,
+			       struct libmnt_fs **pfs);
 extern int mnt_context_next_umount(struct libmnt_context *cxt,
 				struct libmnt_iter *itr,
 				struct libmnt_fs **fs,

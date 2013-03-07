@@ -66,6 +66,12 @@ version 2.7 and later: the
 .I proc
 filesystem is not unmounted.)
 .TP
+\fB\-A\fR, \fB\-\-all-targets\fR
+Unmount all mountpoints in the current namespace for the specified filesystem.
+The filesystem could be specified by one of the mountpoints or device name (or
+UUID, etc.). This option could be used together with \fB\-\-recursive\fR then
+all nested mounts within the filesystem are recursively unmounted.
+.TP
 \fB\-c\fR, \fB\-\-no\-canonicalize\fR
 Do not canonicalize paths.  For more details about this option see the
 .BR mount (8)
@@ -111,7 +117,10 @@ to specify options for which no action should be taken.
 .TP
 \fB\-R\fR, \fB\-\-recursive\fR
 Recursively unmount each directory specified. Recursion for each directory will
-stop if any unmount operation in the chain fails for any reason.
+stop if any unmount operation in the chain fails for any reason. The relationship
+between mountpoints is determined by /proc/self/mountinfo entries. The filesystem
+must be specified by mountpoint path, recursive unmount by device name (or UUID)
+is unsupported.
 .TP
 \fB\-r\fR, \fB\-\-read\-only\fR
 In case unmounting fails, try to remount read-only.

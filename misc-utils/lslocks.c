@@ -32,6 +32,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <libmount.h>
+
 #include "pathnames.h"
 #include "canonicalize.h"
 #include "nls.h"
@@ -53,6 +55,7 @@ enum {
 	COL_START,
 	COL_END,
 	COL_PATH,
+	COL_BLOCKER
 };
 
 /* column names */
@@ -74,10 +77,13 @@ static struct colinfo infos[] = {
 	[COL_START] = { "START", 10, TT_FL_RIGHT, N_("relative byte offset of the lock")},
 	[COL_END]  = { "END",    10, TT_FL_RIGHT, N_("ending offset of the lock")},
 	[COL_PATH] = { "PATH",    0, TT_FL_TRUNC, N_("path of the locked file")},
+	[COL_BLOCKER] = { "BLOCKER", 0, TT_FL_RIGHT, N_("PID of the process blocking the lock") }
 };
 #define NCOLS ARRAY_SIZE(infos)
 static int columns[NCOLS], ncolumns;
 static pid_t pid = 0;
+
+static struct libmnt_table *tab;		/* /proc/self/mountinfo */
 
 struct lock {
 	struct list_head locks;
@@ -89,8 +95,10 @@ struct lock {
 	char *mode;
 	off_t start;
 	off_t end;
-	int mandatory;
+	unsigned int mandatory :1,
+		     blocked   :1;
 	char *size;
+	int id;
 };
 
 static void disable_columns_truncate(void)
@@ -128,26 +136,19 @@ out:
  */
 static char *get_fallback_filename(dev_t dev)
 {
-	char buf[BUFSIZ], target[PATH_MAX], *ret = NULL;
-	int maj, min;
-	FILE *fp;
+	struct libmnt_fs *fs;
 
-	if (!(fp = fopen(_PATH_PROC_MOUNTINFO, "r")))
+	if (!tab) {
+		tab = mnt_new_table_from_file(_PATH_PROC_MOUNTINFO);
+		if (!tab)
+			return NULL;
+	}
+
+	fs = mnt_table_find_devno(tab, dev, MNT_ITER_BACKWARD);
+	if (!fs)
 		return NULL;
 
-	while (fgets(buf, sizeof(buf), fp)) {
-		sscanf(buf, "%*u %*u %u:%u %*s %s",
-			    &maj, &min, target);
-
-		if (dev == makedev(maj, min)) {
-			ret = xstrdup(target);
-			goto out;
-
-		}
-	}
-out:
-	fclose(fp);
-	return ret;
+	return xstrdup(mnt_fs_get_target(fs));
 }
 
 /*
@@ -250,14 +251,20 @@ static int get_local_locks(struct list_head *locks)
 			 * separated by ' ' - check <kernel>/fs/locks.c
 			 */
 			switch (i) {
-			case 0: /* ignore */
+			case 0: /* ID: */
+				tok[strlen(tok) - 1] = '\0';
+				l->id = strtos32_or_err(tok, _("failed to parse ID"));
 				break;
 			case 1: /* posix, flock, etc */
-				l->type = xstrdup(tok);
+				if (strcmp(tok, "->") == 0) {	/* optional field */
+					l->blocked = 1;
+					i--;
+				} else
+					l->type = xstrdup(tok);
 				break;
 
 			case 2: /* is this a mandatory lock? other values are advisory or noinode */
-				l->mandatory = *tok == 'M' ? TRUE : FALSE;
+				l->mandatory = *tok == 'M' ? 1 : 0;
 				break;
 			case 3: /* lock mode */
 				l->mode = xstrdup(tok);
@@ -302,22 +309,6 @@ static int get_local_locks(struct list_head *locks)
 			szstr = size_to_human_string(SIZE_SUFFIX_1LETTER, sz);
 			l->size = xstrdup(szstr);
 			free(szstr);
-		}
-
-		if (pid && pid != l->pid) {
-			/*
-			 * It's easier to just parse the file then decide if
-			 * it should be added to the list - otherwise just
-			 * get rid of stored data
-			 */
-			free(l->path);
-			free(l->size);
-			free(l->mode);
-			free(l->cmdname);
-			free(l->type);
-			free(l);
-
-			continue;
 		}
 
 		list_add(&l->locks, locks);
@@ -372,7 +363,21 @@ static void rem_lock(struct lock *lock)
 	free(lock);
 }
 
-static void add_tt_line(struct tt *tt, struct lock *l)
+static pid_t get_blocker(int id, struct list_head *locks)
+{
+	struct list_head *p;
+
+	list_for_each(p, locks) {
+		struct lock *l = list_entry(p, struct lock, locks);
+
+		if (l->id == id && !l->blocked)
+			return l->pid;
+	}
+
+	return 0;
+}
+
+static void add_tt_line(struct tt *tt, struct lock *l, struct list_head *locks)
 {
 	int i;
 	struct tt_line *line;
@@ -409,10 +414,10 @@ static void add_tt_line(struct tt *tt, struct lock *l)
 			xasprintf(&str, "%s", l->size);
 			break;
 		case COL_MODE:
-			xasprintf(&str, "%s", l->mode);
+			xasprintf(&str, "%s%s", l->mode, l->blocked ? "*" : "");
 			break;
 		case COL_M:
-			xasprintf(&str, "%d", l->mandatory);
+			xasprintf(&str, "%d", l->mandatory ? 1 : 0);
 			break;
 		case COL_START:
 			xasprintf(&str, "%jd", l->start);
@@ -423,6 +428,13 @@ static void add_tt_line(struct tt *tt, struct lock *l)
 		case COL_PATH:
 			xasprintf(&str, "%s", l->path ? l->path : notfnd);
 			break;
+		case COL_BLOCKER:
+		{
+			pid_t bl = l->blocked && l->id ?
+						get_blocker(l->id, locks) : 0;
+			if (bl)
+				xasprintf(&str, "%d", (int) bl);
+		}
 		default:
 			break;
 		}
@@ -454,10 +466,20 @@ static int show_locks(struct list_head *locks, int tt_flags)
 		}
 	}
 
+	/* prepare data for output */
+	list_for_each(p, locks) {
+		struct lock *l = list_entry(p, struct lock, locks);
+
+		if (pid && pid != l->pid)
+			continue;
+
+		add_tt_line(tt, l, locks);
+	}
+
+	/* destroy the list */
 	list_for_each_safe(p, pnext, locks) {
-		struct lock *lock = list_entry(p, struct lock, locks);
-		add_tt_line(tt, lock);
-		rem_lock(lock);
+		struct lock *l = list_entry(p, struct lock, locks);
+		rem_lock(l);
 	}
 
 	tt_print_table(tt);
@@ -499,6 +521,7 @@ int main(int argc, char *argv[])
 {
 	int c, tt_flags = 0, rc = 0;
 	struct list_head locks;
+	char *outarg = NULL;
 	static const struct option long_opts[] = {
 		{ "pid",	required_argument, NULL, 'p' },
 		{ "help",	no_argument,       NULL, 'h' },
@@ -523,11 +546,7 @@ int main(int argc, char *argv[])
 			pid = strtos32_or_err(optarg, _("invalid PID argument"));
 			break;
 		case 'o':
-			ncolumns = string_to_idarray(optarg,
-						     columns, ARRAY_SIZE(columns),
-						     column_name_to_id);
-			if (ncolumns < 0)
-				return EXIT_FAILURE;
+			outarg = optarg;
 			break;
 		case 'V':
 			printf(UTIL_LINUX_VERSION);
@@ -564,10 +583,15 @@ int main(int argc, char *argv[])
 		columns[ncolumns++] = COL_PATH;
 	}
 
+	if (outarg && string_add_to_idarray(outarg, columns, ARRAY_SIZE(columns),
+					 &ncolumns, column_name_to_id) < 0)
+		return EXIT_FAILURE;
+
 	rc = get_local_locks(&locks);
 
 	if (!rc && !list_empty(&locks))
 		rc = show_locks(&locks, tt_flags);
 
+	mnt_free_table(tab);
 	return rc;
 }

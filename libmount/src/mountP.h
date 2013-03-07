@@ -132,6 +132,8 @@ extern int endswith(const char *s, const char *sx)
 extern int startswith(const char *s, const char *sx)
 			__attribute__((nonnull));
 
+extern int is_file_empty(const char *name);
+
 extern int mkdir_p(const char *path, mode_t mode);
 
 extern int mnt_is_readonly(const char *path)
@@ -338,7 +340,6 @@ struct libmnt_context
 	int		utab_writable; /* is utab writable */
 
 	int	flags;		/* private context flags */
-	int	ambi;		/* libblkid returns ambivalent result */
 
 	char	*helper;	/* name of the used /sbin/[u]mount.<type> helper */
 	int	helper_status;	/* helper wait(2) status */

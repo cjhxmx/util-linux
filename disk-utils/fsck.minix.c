@@ -62,7 +62,7 @@
  * 06.11.96  - Added v2 code submitted by Joerg Dorchain, but written by
  *             Andreas Schwab.
  *
- * 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ * 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  *
  * 2008-04-06 James Youngman <jay@gnu.org>
@@ -111,6 +111,7 @@
 #include "ismounted.h"
 #include "all-io.h"
 #include "closestream.h"
+#include "rpmatch.h"
 
 #define ROOT_INO 1
 #define YESNO_LENGTH 64
@@ -213,7 +214,7 @@ static void
 die(const char *fmt, ...) {
 	va_list ap;
 
-	fprintf(stderr, "%s: ", program_invocation_short_name);
+	fprintf(stderr, UTIL_LINUX_VERSION);
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);

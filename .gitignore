@@ -9,6 +9,9 @@
 *.la
 *.so.*
 *.pc
+*.gcda
+*.gcno
+*.gcov
 Makefile
 aclocal.m4
 autom4te.cache
@@ -127,6 +130,7 @@ tests/run.sh.trs
 /mountpoint
 /namei
 /newgrp
+/nsenter
 /partx
 /pg
 /pivot_root
@@ -146,6 +150,7 @@ tests/run.sh.trs
 /script
 /scriptreplay
 /setarch
+/setpriv
 /setsid
 /setterm
 /sfdisk

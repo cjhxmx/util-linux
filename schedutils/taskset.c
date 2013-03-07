@@ -93,8 +93,7 @@ static void print_affinity(struct taskset *ts, int isnew)
 	}
 
 	if (!str)
-		/* this is internal error... */
-		errx(EXIT_FAILURE, _("conversion from cpuset to string failed"));
+		errx(EXIT_FAILURE, _("internal error: conversion from cpuset to string failed"));
 
 	printf(msg, ts->pid, str);
 }
@@ -164,7 +163,7 @@ int main(int argc, char **argv)
 			ts.use_list = 1;
 			break;
 		case 'V':
-			printf("%s from %s\n", program_invocation_short_name,
+			printf(_("%s from %s\n"), program_invocation_short_name,
 			       PACKAGE_STRING);
 			return EXIT_SUCCESS;
 		case 'h':
@@ -235,7 +234,7 @@ int main(int argc, char **argv)
 	if (!pid) {
 		argv += optind + 1;
 		execvp(argv[0], argv);
-		err(EXIT_FAILURE, _("executing %s failed"), argv[0]);
+		err(EXIT_FAILURE, _("failed to execute %s"), argv[0]);
 	}
 
 	return EXIT_SUCCESS;

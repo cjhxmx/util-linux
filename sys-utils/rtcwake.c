@@ -461,7 +461,8 @@ int main(int argc, char **argv)
 			break;
 
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
+			printf(_("%s from %s\n"),
+			       program_invocation_short_name, PACKAGE_STRING);
 			exit(EXIT_SUCCESS);
 
 		case 'h':
@@ -572,7 +573,7 @@ int main(int argc, char **argv)
 		if (!dryrun) {
 			execv(arg[0], arg);
 
-			warn(_("unable to execute %s"),	_PATH_SHUTDOWN);
+			warn(_("failed to execute %s"), _PATH_SHUTDOWN);
 			rc = EXIT_FAILURE;
 		}
 

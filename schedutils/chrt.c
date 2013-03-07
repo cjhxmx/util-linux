@@ -263,8 +263,8 @@ int main(int argc, char **argv)
 			verbose = 1;
 			break;
 		case 'V':
-			printf("%s from %s\n", program_invocation_short_name,
-					       PACKAGE_STRING);
+			printf(_("%s from %s\n"), program_invocation_short_name,
+			       PACKAGE_STRING);
 			return EXIT_SUCCESS;
 		case 'h':
 			ret = EXIT_SUCCESS;
@@ -331,7 +331,6 @@ int main(int argc, char **argv)
 	if (!pid) {
 		argv += optind + 1;
 		execvp(argv[0], argv);
-		perror("execvp");
 		err(EXIT_FAILURE, _("failed to execute %s"), argv[0]);
 	}
 

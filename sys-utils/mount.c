@@ -247,7 +247,7 @@ static void success_message(struct libmnt_context *cxt)
 	if (mflags & MS_MOVE)
 		printf(_("%s: %s moved to %s.\n"), pr, src, tgt);
 	else if (mflags & MS_BIND)
-		printf(_("%s: %s binded on %s.\n"), pr, src, tgt);
+		printf(_("%s: %s bound on %s.\n"), pr, src, tgt);
 	else if (mflags & MS_PROPAGATION) {
 		if (src && strcmp(src, "none") != 0 && tgt)
 			printf(_("%s: %s mounted on %s.\n"), pr, src, tgt);
@@ -384,6 +384,11 @@ try_readonly:
 			else
 				warnx(_("can't find mount source %s in %s"),
 						src, mnt_get_fstab_path());
+			return MOUNT_EX_USAGE;
+		case -MNT_ERR_AMBIFS:
+			warnx(_("%s: more filesystems detected. This should not happen,\n"
+			  "       use -t <type> to explicitly specify the filesystem type or\n"
+			  "       use wipefs(8) to clean up the device."), src);
 			return MOUNT_EX_USAGE;
 		case -MNT_ERR_NOFSTYPE:
 			if (restricted)

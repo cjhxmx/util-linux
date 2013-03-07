@@ -206,7 +206,7 @@ int main(int argc, char *argv[])
 				_("invalid exit code"));
 			break;
 		case 'V':
-			printf("flock (%s)\n", PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			exit(EX_OK);
 		default:
 			/* optopt will be set if this was an unrecognized
@@ -317,7 +317,7 @@ int main(int argc, char *argv[])
 				close(fd);
 			execvp(cmd_argv[0], cmd_argv);
 			/* execvp() failed */
-			warn("%s", cmd_argv[0]);
+			warn(_("failed to execute %s"), cmd_argv[0]);
 			_exit((errno == ENOMEM) ? EX_OSERR : EX_UNAVAILABLE);
 		} else {
 			do {

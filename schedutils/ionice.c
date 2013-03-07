@@ -82,8 +82,8 @@ static void ioprio_print(int pid)
 			name = to_prio[ioclass];
 
 		if (ioclass != IOPRIO_CLASS_IDLE)
-			printf("%s: prio %lu\n", name,
-					IOPRIO_PRIO_DATA(ioprio));
+			printf(_("%s: prio %lu\n"), name,
+			       IOPRIO_PRIO_DATA(ioprio));
 		else
 			printf("%s\n", name);
 	}
@@ -229,7 +229,7 @@ int main(int argc, char **argv)
 		 */
 		ioprio_setpid(0, ioclass, data);
 		execvp(argv[optind], &argv[optind]);
-		err(EXIT_FAILURE, _("executing %s failed"), argv[optind]);
+		err(EXIT_FAILURE, _("failed to execute %s"), argv[optind]);
 	} else
 		usage(stderr);
 

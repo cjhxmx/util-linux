@@ -36,7 +36,7 @@
 
 /* 1999-02-01	Jean-Francois Bignolles: added option '-m' to display
  *		monday as the first day of the week.
- * 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ * 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  *
  * 2000-09-01  Michael Charles Pruznick <dummy@netwiz.net>
@@ -350,8 +350,7 @@ main(int argc, char **argv) {
 			yflag = 1;
 			break;
 		case 'V':
-			printf(_("%s from %s\n"), program_invocation_short_name,
-			       PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			return EXIT_SUCCESS;
 		case 'h':
 			usage(stdout);

@@ -23,6 +23,9 @@ Print a help text and exit.
 Specify which output columns to print. Use
 .B "--help"
 to get a list of all supported columns.
+
+The default list of columns may be extended if \fIlist\fP is
+specified in the format \fI+list\fP (e.g. \fBlslocks -o +BLOCKER\fP).
 .IP "\fB\-n, \-\-noheadings\fP"
 Do not print a header line.
 .IP "\fB\-u, \-\-notruncate\fP"
@@ -44,8 +47,8 @@ Type of lock, can be FLOCK (created with flock(2)) or POSIX (created with fcntl(
 Size of the locked file.
 
 .IP "MODE"
-Lock access permissions (read, write).
-
+Lock access permissions (read, write). If the process is blocked and waiting for the lock
+than the '*' (asterisk) postfix is used for the mode.
 .IP "M"
 Mandatory state of the lock: 0 if none; 1 if set.  (See chmod(1)).
 
@@ -60,6 +63,9 @@ Full path of the lock - if none is found or no permissions to read the path it
 will fallback to the device's mountpoint. The path might be truncated, use
 .B "--notruncate"
 to get the full path.
+
+.IP "BLOCKER"
+Process ID which blocks the lock.
 
 .SH NOTES
 .nf

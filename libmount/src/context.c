@@ -146,7 +146,6 @@ int mnt_reset_context(struct libmnt_context *cxt)
 
 	cxt->fs = NULL;
 	cxt->mtab = NULL;
-	cxt->ambi = 0;
 	cxt->helper = NULL;
 	cxt->orig_user = NULL;
 	cxt->mountflags = 0;
@@ -1514,13 +1513,16 @@ int mnt_context_guess_fstype(struct libmnt_context *cxt)
 
 	if (access(dev, F_OK) == 0) {
 		struct libmnt_cache *cache = mnt_context_get_cache(cxt);
+		int ambi = 0;
 
-		type = mnt_get_fstype(dev, &cxt->ambi, cache);
+		type = mnt_get_fstype(dev, &ambi, cache);
 		if (type) {
 			rc = mnt_fs_set_fstype(cxt->fs, type);
 			if (!cache)
 				free(type);	/* type is not cached */
 		}
+		if (ambi)
+			rc = -MNT_ERR_AMBIFS;
 	} else {
 		if (strchr(dev, ':') != NULL)
 			rc = mnt_fs_set_fstype(cxt->fs, "nfs");
@@ -1529,7 +1531,8 @@ int mnt_context_guess_fstype(struct libmnt_context *cxt)
 	}
 
 done:
-	DBG(CXT, mnt_debug_h(cxt, "FS type: %s", mnt_fs_get_fstype(cxt->fs)));
+	DBG(CXT, mnt_debug_h(cxt, "FS type: %s [rc=%d]",
+				mnt_fs_get_fstype(cxt->fs), rc));
 	return rc;
 none:
 	return mnt_fs_set_fstype(cxt->fs, "none");
@@ -1673,14 +1676,21 @@ int mnt_context_prepare_update(struct libmnt_context *cxt)
 				cxt->syscall_status));
 		return 0;
 	}
+
 	if (!cxt->update) {
+		const char *name = cxt->mtab_writable ? cxt->mtab_path : cxt->utab_path;
+
+		if (cxt->action == MNT_ACT_UMOUNT && is_file_empty(name)) {
+			DBG(CXT, mnt_debug_h(cxt,
+				"skip update: umount, no table"));
+			return 0;
+		}
+
 		cxt->update = mnt_new_update();
 		if (!cxt->update)
 			return -ENOMEM;
 
-		mnt_update_set_filename(cxt->update,
-				cxt->mtab_writable ? cxt->mtab_path : cxt->utab_path,
-				!cxt->mtab_writable);
+		mnt_update_set_filename(cxt->update, name, !cxt->mtab_writable);
 	}
 
 	if (cxt->action == MNT_ACT_UMOUNT)

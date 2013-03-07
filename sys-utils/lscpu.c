@@ -518,9 +518,10 @@ read_hypervisor_cpuid(struct lscpu_desc *desc)
 #endif
 
 static void
-read_hypervisor(struct lscpu_desc *desc)
+read_hypervisor(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 {
-	read_hypervisor_cpuid(desc);
+	if (mod->system != SYSTEM_SNAPSHOT)
+		read_hypervisor_cpuid(desc);
 
 	if (desc->hyper)
 		/* hvm */
@@ -1246,19 +1247,19 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	size_t i;
 
 	fputs(USAGE_HEADER, out);
-	fprintf(out,
-	      _(" %s [options]\n"), program_invocation_short_name);
+	fprintf(out, _(" %s [options]\n"), program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
-	fputs(_(" -a, --all               print online and offline CPUs (default for -e)\n"
-		" -b, --online            print online CPUs only (default for -p)\n"
-		" -c, --offline           print offline CPUs only\n"
-		" -e, --extended[=<list>] print out an extended readable format\n"
-		" -h, --help              print this help\n"
-		" -p, --parse[=<list>]    print out a parsable format\n"
-		" -s, --sysroot <dir>     use directory DIR as system root\n"
-		" -V, --version           print version information and exit\n"
-		" -x, --hex               print hexadecimal masks rather than lists of CPUs\n"), out);
+	fputs(_(" -a, --all               print both online and offline CPUs (default for -e)\n"), out);
+	fputs(_(" -b, --online            print online CPUs only (default for -p)\n"), out);
+	fputs(_(" -c, --offline           print offline CPUs only\n"), out);
+	fputs(_(" -e, --extended[=<list>] print out an extended readable format\n"), out);
+	fputs(_(" -p, --parse[=<list>]    print out a parsable format\n"), out);
+	fputs(_(" -s, --sysroot <dir>     use specified directory as system root\n"), out);
+	fputs(_(" -x, --hex               print hexadecimal masks rather than lists of CPUs\n"), out);
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
 
 	fprintf(out, _("\nAvailable columns:\n"));
 
@@ -1385,7 +1386,7 @@ int main(int argc, char *argv[])
 				sizeof(struct cpu_cache), cachecmp);
 
 	read_nodes(desc);
-	read_hypervisor(desc);
+	read_hypervisor(desc, mod);
 
 	switch(mod->mode) {
 	case OUTPUT_SUMMARY:

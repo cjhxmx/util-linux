@@ -1,6 +1,7 @@
 /*
  *   chfn.c -- change your finger information
  *   (c) 1994 by salvatore valente <svalente@athena.mit.edu>
+ *   (c) 2012 by Cody Maloney <cmaloney@theoreticalchaos.com>
  *
  *   this program is free software.  you can redistribute it and
  *   modify it under the terms of the gnu general public license.
@@ -16,7 +17,7 @@
  * Hacked by Peter Breitenlohner, peb@mppmu.mpg.de,
  * to remove trailing empty fields.  Oct 5, 96.
  *
- *  1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ *  1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  *  - added Native Language Support
  */
 
@@ -36,7 +37,6 @@
 #include "closestream.h"
 #include "islocal.h"
 #include "nls.h"
-#include "pamfail.h"
 #include "setpwnam.h"
 #include "strutils.h"
 #include "xalloc.h"
@@ -45,6 +45,13 @@
 # include <selinux/selinux.h>
 # include <selinux/av_permissions.h>
 # include "selinux_utils.h"
+#endif
+
+#ifdef HAVE_LIBUSER
+# include <libuser/user.h>
+# include "libuser.h"
+#elif CHFN_CHSH_PASSWORD
+# include "auth.h"
 #endif
 
 static char buf[1024];
@@ -126,8 +133,10 @@ int main(int argc, char **argv)
 			     newf.username);
 	}
 
+#ifndef HAVE_LIBUSER
 	if (!(is_local(oldf.username)))
 		errx(EXIT_FAILURE, _("can only change local entries"));
+#endif
 
 #ifdef HAVE_LIBSELINUX
 	if (is_selinux_enabled() > 0) {
@@ -149,44 +158,24 @@ int main(int argc, char **argv)
 	}
 #endif
 
-	/* Reality check */
+#ifdef HAVE_LIBUSER
+	/* If we're setuid and not really root, disallow the password change. */
+	if (geteuid() != getuid() && uid != oldf.pw->pw_uid) {
+#else
 	if (uid != 0 && uid != oldf.pw->pw_uid) {
+#endif
 		errno = EACCES;
-		err(EXIT_FAILURE, NULL);
+		err(EXIT_FAILURE, _("running UID doesn't match UID of user we're "
+		      "altering, change denied"));
 	}
 
 	printf(_("Changing finger information for %s.\n"), oldf.username);
 
-#ifdef REQUIRE_PASSWORD
-	if (uid != 0) {
-		pam_handle_t *pamh = NULL;
-		struct pam_conv conv = { misc_conv, NULL };
-		int retcode;
-
-		retcode = pam_start("chfn", oldf.username, &conv, &pamh);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		retcode = pam_authenticate(pamh, 0);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		retcode = pam_acct_mgmt(pamh, 0);
-		if (retcode == PAM_NEW_AUTHTOK_REQD)
-			retcode =
-			    pam_chauthtok(pamh, PAM_CHANGE_EXPIRED_AUTHTOK);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		retcode = pam_setcred(pamh, 0);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		pam_end(pamh, 0);
-		/* no need to establish a session; this isn't a
-		 * session-oriented activity...  */
+#if !defined(HAVE_LIBUSER) && defined(CHFN_CHSH_PASSWORD)
+	if(!auth_pam("chfn", uid, oldf.username)) {
+		return EXIT_FAILURE;
 	}
-#endif	/* REQUIRE_PASSWORD */
+#endif
 
 	if (interactive)
 		ask_info(&oldf, &newf);
@@ -472,10 +461,15 @@ static int save_new_data(struct finfo *pinfo)
 		gecos[len] = 0;
 	}
 
+#ifdef HAVE_LIBUSER
+	if (set_value_libuser("chfn", pinfo->pw->pw_name, pinfo->pw->pw_uid,
+			LU_GECOS, gecos) < 0) {
+#else /* HAVE_LIBUSER */
 	/* write the new struct passwd to the passwd file. */
 	pinfo->pw->pw_gecos = gecos;
 	if (setpwnam(pinfo->pw) < 0) {
-		warn("setpwnam");
+		warn("setpwnam failed");
+#endif
 		printf(_
 		       ("Finger information *NOT* changed.  Try again later.\n"));
 		return -1;

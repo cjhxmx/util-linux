@@ -1,11 +1,15 @@
 AC_INIT(util-linux,
 	m4_esyscmd([tools/git-version-gen .tarball-version]),
-	kzak@redhat.com)
+	[kzak@redhat.com],,
+	[http://www.kernel.org/pub/linux/utils/util-linux/])
 
 AC_PREREQ(2.60)
 
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR([m4])
+dnl AC_USE_SYSTEM_EXTENSIONS must be called before any macros that run
+dnl the compiler (like AC_PROG_LIBTOOL) to avoid autoconf errors.
+AC_USE_SYSTEM_EXTENSIONS
 AM_INIT_AUTOMAKE([-Wall foreign 1.10 tar-pax dist-bzip2 no-dist-gzip dist-xz -Wno-portability subdir-objects])
 
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])],
@@ -87,7 +91,6 @@ AC_SUBST([usrlib_execdir])
 
 AM_PROG_CC_C_O
 AC_PROG_CC_STDC
-AC_GNU_SOURCE
 AC_CANONICAL_HOST
 AC_C_CONST
 AC_C_VOLATILE
@@ -298,6 +301,7 @@ AC_CHECK_DECL([strsignal],
 
 AC_CHECK_FUNCS([ \
 	__fpending \
+	secure_getenv \
 	__secure_getenv \
 	err \
 	errx \
@@ -313,6 +317,7 @@ AC_CHECK_FUNCS([ \
 	lchown \
 	llseek \
 	lseek64 \
+	mempcpy \
 	nanosleep \
 	personality \
 	posix_fadvise \
@@ -374,13 +379,19 @@ no:no)
 esac
 
 
-AC_MSG_CHECKING(whether program_invocation_short_name is defined)
-AC_TRY_COMPILE([#include <argp.h>],
-	       [program_invocation_short_name = "test";],
-	       AC_DEFINE(HAVE_PROGRAM_INVOCATION_SHORT_NAME, 1,
-			 [Define if program_invocation_short_name is defined])
-	       AC_MSG_RESULT(yes),
-	       AC_MSG_RESULT(no))
+AC_MSG_CHECKING([whether program_invocation_short_name is defined])
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+	#include <argp.h>
+]], [[
+	program_invocation_short_name = "test";
+]])], [
+	AC_MSG_RESULT([yes])
+	AC_DEFINE([HAVE_PROGRAM_INVOCATION_SHORT_NAME], [1],
+		[Define if program_invocation_short_name is defined])
+], [
+	AC_MSG_RESULT([no])
+])
+
 
 AC_MSG_CHECKING([whether __progname is defined])
 AC_LINK_IFELSE([AC_LANG_PROGRAM([extern char *__progname;],
@@ -879,6 +890,20 @@ if test "x$build_nsenter" = xyes; then
   AC_CHECK_FUNCS([setns])
 fi
 
+dnl setpriv depends on libcap-ng.  It would be possible to build
+dnl a version of setpriv with limited functionality without libcap-ng,
+dnl but this isn't currently supported.
+UL_CHECK_LIB([cap-ng], [capng_apply], [cap_ng])
+AC_ARG_ENABLE([setpriv],
+  AS_HELP_STRING([--disable-setpriv], [do not build setpriv]),
+  [], enable_setpriv=check
+)
+UL_BUILD_INIT([setpriv])
+UL_REQUIRES_LINUX([setpriv])
+UL_REQUIRES_HAVE([setpriv], [cap_ng], [libcap-ng])
+AM_CONDITIONAL(BUILD_SETPRIV, test "x$build_setpriv" = xyes)
+
+
 AC_ARG_ENABLE([arch],
   AS_HELP_STRING([--enable-arch], [do build arch]),
   [], enable_arch=no
@@ -1057,7 +1082,7 @@ AM_CONDITIONAL(BUILD_MESG, test "x$build_mesg" = xyes)
 
 
 AC_ARG_ENABLE([raw],
-  AS_HELP_STRING([--enable-raw], [build raw]),
+	      AS_HELP_STRING([--disable-raw], [do not build raw]),
   [], enable_raw=check
 )
 UL_BUILD_INIT([raw])
@@ -1098,13 +1123,38 @@ UL_BUILD_INIT([newgrp])
 AM_CONDITIONAL(BUILD_NEWGRP, test "x$build_newgrp" = xyes)
 
 
+AC_ARG_WITH([user], AS_HELP_STRING([--without-user], [compile without libuser (remote chsh)]),
+  [], with_user=auto
+)
+if test "x$with_user" = xno; then
+  AM_CONDITIONAL(HAVE_USER, false)
+else
+  PKG_CHECK_MODULES(LIBUSER,[libuser >= 0.58])
+  UL_CHECK_LIB(user, lu_start)
+  case "$with_user:$have_user" in
+  yes:no)
+   AC_MSG_ERROR([user selected but libuser not found])
+   ;;
+  esac
+fi
+
+AC_ARG_ENABLE([chfn-chsh-password],
+  AS_HELP_STRING([--disable-chfn-chsh-password], [do not require the user to enter the password in chfn and chsh]),
+  [], enable_chfn_chsh_password=yes
+)
+
 AC_ARG_ENABLE([chfn-chsh],
   AS_HELP_STRING([--enable-chfn-chsh], [build chfn and chsh]),
   [], enable_chfn_chsh=no
 )
 UL_BUILD_INIT([chfn_chsh])
-UL_REQUIRES_HAVE([chfn_chsh], [security_pam_misc_h], [PAM header file])
+
+if test "x$enable_chfn_chsh_password" = xyes -o "x$have_user" = xyes; then
+  UL_REQUIRES_HAVE([chfn_chsh], [security_pam_misc_h], [PAM header file])
+  AC_DEFINE(CHFN_CHSH_PASSWORD, 1, [Should chfn and chsh require the user to enter the password?])
+fi
 AM_CONDITIONAL(BUILD_CHFN_CHSH, test "x$build_chfn_chsh" = xyes)
+AM_CONDITIONAL(CHFN_CHSH_PASSWORD, test "x$enable_chfn_chsh_password" = xyes)
 
 AC_ARG_ENABLE([chsh-only-listed],
 AS_HELP_STRING([--disable-chsh-only-listed], [chsh: allow shells not in /etc/shells]),
@@ -1167,6 +1217,33 @@ AC_ARG_ENABLE([runuser],
 UL_BUILD_INIT([runuser])
 UL_REQUIRES_HAVE([runuser], [security_pam_misc_h], [PAM header file])
 AM_CONDITIONAL(BUILD_RUNUSER, test "x$build_runuser" = xyes)
+
+
+AC_ARG_ENABLE([ul],
+  AS_HELP_STRING([--disable-ul], [do not build ul]),
+  [], enable_ul=check
+)
+UL_BUILD_INIT([ul])
+UL_REQUIRES_HAVE([ul], [ncurses, tinfo], [ncurses or tinfo libraries])
+AM_CONDITIONAL(BUILD_UL, test "x$build_ul" = xyes)
+
+
+AC_ARG_ENABLE([more],
+  AS_HELP_STRING([--disable-more], [do not build more]),
+  [], enable_more=check
+)
+UL_BUILD_INIT([more])
+UL_REQUIRES_HAVE([more], [ncurses, tinfo, termcap], [ncurses, tinfo or termcap libraries])
+AM_CONDITIONAL(BUILD_MORE, test "x$build_more" = xyes)
+
+
+AC_ARG_ENABLE([pg],
+  AS_HELP_STRING([--disable-pg], [do not build pg]),
+  [], enable_pg=check
+)
+UL_BUILD_INIT([pg])
+UL_REQUIRES_HAVE([pg], [ncurses], [ncurses or ncursesw library])
+AM_CONDITIONAL(BUILD_PG, test "x$build_pg" = xyes)
 
 
 AC_ARG_ENABLE([schedutils],
@@ -1271,16 +1348,6 @@ AC_ARG_ENABLE([pg-bell],
 
 if test "x$enable_pg_bell" = xyes; then
   AC_DEFINE(PG_BELL, 1, [Should pg ring the bell on invalid keys?])
-fi
-
-
-AC_ARG_ENABLE([require-password],
-  AS_HELP_STRING([--disable-require-password], [do not require the user to enter the password in chfn and chsh]),
-  [], enable_require_password=yes
-)
-
-if test "x$enable_require_password" = xyes; then
-  AC_DEFINE(REQUIRE_PASSWORD, 1, [Should chfn and chsh require the user to enter the password?])
 fi
 
 

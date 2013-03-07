@@ -1,6 +1,7 @@
 /*
  *   chsh.c -- change your login shell
  *   (c) 1994 by salvatore valente <svalente@athena.mit.edu>
+ *   (c) 2012 by Cody Maloney <cmaloney@theoreticalchaos.com>
  *
  *   this program is free software.  you can redistribute it and
  *   modify it under the terms of the gnu general public license.
@@ -17,7 +18,7 @@
  *   suggestion from Zefram.  Disallowing users with shells not in /etc/shells
  *   from changing their shell.
  *
- *   1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ *   1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  *   - added Native Language Support
  */
 
@@ -37,7 +38,6 @@
 #include "closestream.h"
 #include "islocal.h"
 #include "nls.h"
-#include "pamfail.h"
 #include "pathnames.h"
 #include "setpwnam.h"
 #include "xalloc.h"
@@ -46,6 +46,14 @@
 # include <selinux/selinux.h>
 # include <selinux/av_permissions.h>
 # include "selinux_utils.h"
+#endif
+
+
+#ifdef HAVE_LIBUSER
+# include <libuser/user.h>
+# include "libuser.h"
+#elif CHFN_CHSH_PASSWORD
+# include "auth.h"
 #endif
 
 struct sinfo {
@@ -102,8 +110,10 @@ int main(int argc, char **argv)
 			     info.username);
 	}
 
+#ifndef HAVE_LIBUSER
 	if (!(is_local(pw->pw_name)))
 		errx(EXIT_FAILURE, _("can only change local entries."));
+#endif
 
 #ifdef HAVE_LIBSELINUX
 	if (is_selinux_enabled() > 0) {
@@ -131,7 +141,12 @@ int main(int argc, char **argv)
 		oldshell = _PATH_BSHELL;	/* default */
 
 	/* reality check */
+#ifdef HAVE_LIBUSER
+	/* If we're setuid and not really root, disallow the password change. */
+	if (geteuid() != getuid() && uid != pw->pw_uid) {
+#else
 	if (uid != 0 && uid != pw->pw_uid) {
+#endif
 		errno = EACCES;
 		err(EXIT_FAILURE,
 		    _("running UID doesn't match UID of user we're "
@@ -147,37 +162,11 @@ int main(int argc, char **argv)
 
 	printf(_("Changing shell for %s.\n"), pw->pw_name);
 
-#ifdef REQUIRE_PASSWORD
-	if (uid != 0) {
-		pam_handle_t *pamh = NULL;
-		struct pam_conv conv = { misc_conv, NULL };
-		int retcode;
-
-		retcode = pam_start("chsh", pw->pw_name, &conv, &pamh);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		retcode = pam_authenticate(pamh, 0);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		retcode = pam_acct_mgmt(pamh, 0);
-		if (retcode == PAM_NEW_AUTHTOK_REQD)
-			retcode =
-			    pam_chauthtok(pamh, PAM_CHANGE_EXPIRED_AUTHTOK);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		retcode = pam_setcred(pamh, 0);
-		if (pam_fail_check(pamh, retcode))
-			return EXIT_FAILURE;
-
-		pam_end(pamh, 0);
-		/* no need to establish a session; this isn't a
-		 * session-oriented activity...  */
+#if !defined(HAVE_LIBUSER) && defined(CHFN_CHSH_PASSWORD)
+	if(!auth_pam("chsh", uid, pw->pw_name)) {
+		return EXIT_FAILURE;
 	}
-#endif	/* REQUIRE_PASSWORD */
-
+#endif
 	if (!shell) {
 		shell = prompt(_("New shell"), oldshell);
 		if (!shell)
@@ -189,10 +178,17 @@ int main(int argc, char **argv)
 
 	if (strcmp(oldshell, shell) == 0)
 		errx(EXIT_SUCCESS, _("Shell not changed."));
+
+#ifdef HAVE_LIBUSER
+	if (set_value_libuser("chsh", pw->pw_name, uid,
+	    LU_LOGINSHELL, shell) < 0)
+		errx(EXIT_FAILURE, _("Shell *NOT* changed.  Try again later."));
+#else
 	pw->pw_shell = shell;
 	if (setpwnam(pw) < 0)
 		err(EXIT_FAILURE, _("setpwnam failed\n"
 			"Shell *NOT* changed.  Try again later."));
+#endif
 
 	printf(_("Shell changed.\n"));
 	return EXIT_SUCCESS;

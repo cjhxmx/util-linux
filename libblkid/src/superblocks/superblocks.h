@@ -69,6 +69,7 @@ extern const struct blkid_idinfo drbdproxy_datalog_idinfo;
 extern const struct blkid_idinfo befs_idinfo;
 extern const struct blkid_idinfo nilfs2_idinfo;
 extern const struct blkid_idinfo exfat_idinfo;
+extern const struct blkid_idinfo f2fs_idinfo;
 
 /*
  * superblock functions
@@ -88,5 +89,7 @@ extern int blkid_probe_strncpy_uuid(blkid_probe pr, unsigned char *str, size_t l
 extern int blkid_probe_set_uuid(blkid_probe pr, unsigned char *uuid);
 extern int blkid_probe_set_uuid_as(blkid_probe pr, unsigned char *uuid, const char *name);
 
+extern int blkid_probe_set_id_label(blkid_probe pr, const char *name,
+			     unsigned char *data, size_t len);
 
 #endif /* _BLKID_SUPERBLOCKS_H */

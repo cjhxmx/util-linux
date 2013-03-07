@@ -88,24 +88,23 @@ static int do_rename(char *from, char *to, char *s, int verbose, int symtarget)
 			printf("`%s' -> `%s'\n", s, newname);
 	}
 
-
 	free(newname);
 	return 1;
 }
 
 static void __attribute__ ((__noreturn__)) usage(FILE * out)
 {
-	fputs(_("\nUsage:\n"), out);
+	fputs(USAGE_HEADER, out);
 	fprintf(out,
 	      _(" %s [options] expression replacement file...\n"),
 		program_invocation_short_name);
-
-	fputs(_("\nOptions:\n"), out);
-	fputs(_(" -v, --verbose    explain what is being done\n"
-		" -V, --version    output version information and exit\n"
-		" -s, --symlink    act on symlink target\n"
-		" -h, --help       display this help and exit\n\n"), out);
-
+	fputs(USAGE_OPTIONS, out);
+	fputs(_(" -v, --verbose    explain what is being done\n"), out);
+	fputs(_(" -s, --symlink    act on symlink target\n"), out);
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
+	fprintf(out, USAGE_MAN_TAIL("rename(1)"));
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
@@ -148,7 +147,7 @@ int main(int argc, char **argv)
 	argv += optind;
 
 	if (argc < 3) {
-		warnx("not enough arguments");
+		warnx(_("not enough arguments"));
 		usage(stderr);
 	}
 

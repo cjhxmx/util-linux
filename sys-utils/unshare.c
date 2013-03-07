@@ -29,6 +29,7 @@
 #include "c.h"
 #include "closestream.h"
 #include "namespace.h"
+#include "exec_shell.h"
 
 static void usage(int status)
 {
@@ -39,12 +40,12 @@ static void usage(int status)
 	      _(" %s [options] <program> [args...]\n"),	program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
-	fputs(_(" -m, --mount       unshare mounts namespace\n"
-		" -u, --uts         unshare UTS namespace (hostname etc)\n"
-		" -i, --ipc         unshare System V IPC namespace\n"
-		" -n, --net         unshare network namespace\n"
-		" -p, --pid         unshare pid namespace\n"
-		" -U, --user        unshare user namespace\n"), out);
+	fputs(_(" -m, --mount       unshare mounts namespace\n"), out);
+	fputs(_(" -u, --uts         unshare UTS namespace (hostname etc)\n"), out);
+	fputs(_(" -i, --ipc         unshare System V IPC namespace\n"), out);
+	fputs(_(" -n, --net         unshare network namespace\n"), out);
+	fputs(_(" -p, --pid         unshare pid namespace\n"), out);
+	fputs(_(" -U, --user        unshare user namespace\n"), out);
 
 	fputs(USAGE_SEPARATOR, out);
 	fputs(USAGE_HELP, out);
@@ -77,8 +78,8 @@ int main(int argc, char *argv[])
 	textdomain(PACKAGE);
 	atexit(close_stdout);
 
-	while((c = getopt_long(argc, argv, "hVmuinpU", longopts, NULL)) != -1) {
-		switch(c) {
+	while ((c = getopt_long(argc, argv, "hVmuinpU", longopts, NULL)) != -1) {
+		switch (c) {
 		case 'h':
 			usage(EXIT_SUCCESS);
 		case 'V':
@@ -107,13 +108,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if(optind >= argc)
-		usage(EXIT_FAILURE);
-
-	if(-1 == unshare(unshare_flags))
+	if (-1 == unshare(unshare_flags))
 		err(EXIT_FAILURE, _("unshare failed"));
 
-	execvp(argv[optind], argv + optind);
-
-	err(EXIT_FAILURE, _("exec %s failed"), argv[optind]);
+	if (optind < argc) {
+		execvp(argv[optind], argv + optind);
+		err(EXIT_FAILURE, _("failed to execute %s"), argv[optind]);
+	}
+	exec_shell();
 }

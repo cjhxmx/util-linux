@@ -380,12 +380,12 @@ int main(int argc, char **argv)
 		if (options.autolog) {
 			/* Autologin prompt */
 			do_prompt(&options, &termios);
-			printf("%s%s (automatic login)\n", LOGIN, options.autolog);
+			printf(_("%s%s (automatic login)\n"), LOGIN, options.autolog);
 		} else {
 			/* Read the login name. */
 			debug("reading login name\n");
 			while ((username =
-				get_logname(&options, &termios, &chardata)) == 0)
+				get_logname(&options, &termios, &chardata)) == NULL)
 				if ((options.flags & F_VCONSOLE) == 0)
 					next_speed(&options, &termios);
 		}
@@ -778,7 +778,7 @@ static void parse_speeds(struct options *op, char *arg)
 	char *cp;
 
 	debug("entered parse_speeds\n");
-	for (cp = strtok(arg, ","); cp != 0; cp = strtok((char *)0, ",")) {
+	for (cp = strtok(arg, ","); cp != NULL; cp = strtok((char *)0, ",")) {
 		if ((op->speeds[op->numspeed++] = bcode(cp)) <= 0)
 			log_err(_("bad speed: %s"), cp);
 		if (op->numspeed >= MAX_SPEED)
@@ -932,7 +932,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 
 		if (((tid = tcgetsid(fd)) < 0) || (pid != tid)) {
 			if (ioctl(fd, TIOCSCTTY, 1) == -1)
-				log_warn("/dev/%s: cannot get controlling tty: %m", tty);
+				log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 		}
 
 		close(STDIN_FILENO);
@@ -954,7 +954,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 			closed = 1;
 
 			if (vhangup())
-				log_err("/dev/%s: vhangup() failed: %m", tty);
+				log_err(_("/dev/%s: vhangup() failed: %m"), tty);
 		} else
 			close(fd);
 
@@ -964,7 +964,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 
 		if (((tid = tcgetsid(STDIN_FILENO)) < 0) || (pid != tid)) {
 			if (ioctl(STDIN_FILENO, TIOCSCTTY, 1) == -1)
-				log_warn("/dev/%s: cannot get controlling tty: %m", tty);
+				log_warn(_("/dev/%s: cannot get controlling tty: %m"), tty);
 		}
 
 	} else {
@@ -980,7 +980,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 	}
 
 	if (tcsetpgrp(STDIN_FILENO, pid))
-		log_warn("/dev/%s: cannot set process group: %m", tty);
+		log_warn(_("/dev/%s: cannot set process group: %m"), tty);
 
 	/* Get rid of the present outputs. */
 	if (!closed) {
@@ -1011,7 +1011,7 @@ static void open_tty(char *tty, struct termios *tp, struct options *op)
 	 */
 	memset(tp, 0, sizeof(struct termios));
 	if (tcgetattr(STDIN_FILENO, tp) < 0)
-		log_err("%s: tcgetattr: %m", tty);
+		log_err(_("%s: failed to get terminal attributes: %m"), tty);
 
 	/*
 	 * Detect if this is a virtual console or serial/modem line.
@@ -1169,7 +1169,7 @@ static void reset_vc(const struct options *op, struct termios *tp)
 	reset_virtual_console(tp, fl);
 
 	if (tcsetattr(STDIN_FILENO, TCSADRAIN, tp))
-		log_warn("tcsetattr problem: %m");
+		log_warn(_("setting terminal attributes failed: %m"));
 }
 
 /* Extract baud rate from modem status message. */
@@ -1307,7 +1307,7 @@ static void do_prompt(struct options *op, struct termios *tp)
 	}
 #endif	/* ISSUE */
 	if (op->flags & F_LOGINPAUSE) {
-		puts("[press ENTER to login]");
+		puts(_("[press ENTER to login]"));
 		getc(stdin);
 	}
 #ifdef KDGKBLED
@@ -1812,7 +1812,7 @@ static char *get_logname(struct options *op, struct termios *tp, struct chardata
 
 		len = mbstowcs((wchar_t *)0, logname, 0);
 		if (len < 0)
-			log_err("%s: invalid character conversion for login name", op->tty);
+			log_err(_("%s: invalid character conversion for login name"), op->tty);
 
 		wcs = (wchar_t *) malloc((len + 1) * sizeof(wchar_t));
 		if (!wcs)
@@ -1820,13 +1820,13 @@ static char *get_logname(struct options *op, struct termios *tp, struct chardata
 
 		len = mbstowcs(wcs, logname, len + 1);
 		if (len < 0)
-			log_err("%s: invalid character conversion for login name", op->tty);
+			log_err(_("%s: invalid character conversion for login name"), op->tty);
 
 		wcp = wcs;
 		while (*wcp) {
 			const wint_t wc = *wcp++;
 			if (!iswprint(wc))
-				log_err("%s: invalid character 0x%x in login name", op->tty, wc);
+				log_err(_("%s: invalid character 0x%x in login name"), op->tty, wc);
 		}
 		free(wcs);
 	} else
@@ -1912,7 +1912,7 @@ static void termio_final(struct options *op, struct termios *tp, struct chardata
 
 	/* Finally, make the new settings effective. */
 	if (tcsetattr(STDIN_FILENO, TCSANOW, tp) < 0)
-		log_err("%s: tcsetattr: TCSANOW: %m", op->tty);
+		log_err(_("%s: failed to set terminal attributes: %m"), op->tty);
 }
 
 /*
@@ -1945,42 +1945,42 @@ static speed_t bcode(char *s)
 	return 0;
 }
 
-static void __attribute__ ((__noreturn__)) usage(FILE * out)
+static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
-	fprintf(out, _("\nUsage:\n"
-		       " %1$s [options] line baud_rate,... [termtype]\n"
-		       " %1$s [options] baud_rate,... line [termtype]\n"),
-		program_invocation_short_name);
-
-	fprintf(out, _("\nOptions:\n"
-		       " -8, --8bits                assume 8-bit tty\n"
-		       " -a, --autologin <user>     login the specified user automatically\n"
-		       " -c, --noreset              do not reset control mode\n"
-		       " -f, --issue-file <file>    display issue file\n"
-		       " -h, --flow-control         enable hardware flow control\n"
-		       " -H, --host <hostname>      specify login host\n"
-		       " -i, --noissue              do not display issue file\n"
-		       " -I, --init-string <string> set init string\n"
-		       " -l, --login-program <file> specify login program\n"
-		       " -L, --local-line           force local line\n"
-		       " -m, --extract-baud         extract baud rate during connect\n"
-		       " -n, --skip-login           do not prompt for login\n"
-		       " -o, --login-options <opts> options that are passed to login\n"
-		       " -p, --loginpause           wait for any key before the login\n"
-		       " -R, --hangup               do virtually hangup on the tty\n"
-		       " -s, --keep-baud            try to keep baud rate after break\n"
-		       " -t, --timeout <number>     login process timeout\n"
-		       " -U, --detect-case          detect uppercase terminal\n"
-		       " -w, --wait-cr              wait carriage-return\n"
-		       "     --noclear              do not clear the screen before prompt\n"
-		       "     --nohints              do not print hints\n"
-		       "     --nonewline            do not print a newline before issue\n"
-		       "     --no-hostname          no hostname at all will be shown\n"
-		       "     --long-hostname        show full qualified hostname\n"
-		       "     --erase-chars <string> additional backspace chars\n"
-		       "     --kill-chars <string>  additional kill chars\n"
-		       "     --version              output version information and exit\n"
-		       "     --help                 display this help and exit\n\n"));
+	fputs(USAGE_HEADER, out);
+	fprintf(out, _(" %1$s [options] line baud_rate,... [termtype]\n"
+		       " %1$s [options] baud_rate,... line [termtype]\n"), program_invocation_short_name);
+	fputs(USAGE_OPTIONS, out);
+	fputs(_(" -8, --8bits                assume 8-bit tty\n"), out);
+	fputs(_(" -a, --autologin <user>     login the specified user automatically\n"), out);
+	fputs(_(" -c, --noreset              do not reset control mode\n"), out);
+	fputs(_(" -f, --issue-file <file>    display issue file\n"), out);
+	fputs(_(" -h, --flow-control         enable hardware flow control\n"), out);
+	fputs(_(" -H, --host <hostname>      specify login host\n"), out);
+	fputs(_(" -i, --noissue              do not display issue file\n"), out);
+	fputs(_(" -I, --init-string <string> set init string\n"), out);
+	fputs(_(" -l, --login-program <file> specify login program\n"), out);
+	fputs(_(" -L, --local-line           force local line\n"), out);
+	fputs(_(" -m, --extract-baud         extract baud rate during connect\n"), out);
+	fputs(_(" -n, --skip-login           do not prompt for login\n"), out);
+	fputs(_(" -o, --login-options <opts> options that are passed to login\n"), out);
+	fputs(_(" -p, --loginpause           wait for any key before the login\n"), out);
+	fputs(_(" -R, --hangup               do virtually hangup on the tty\n"), out);
+	fputs(_(" -s, --keep-baud            try to keep baud rate after break\n"), out);
+	fputs(_(" -t, --timeout <number>     login process timeout\n"), out);
+	fputs(_(" -U, --detect-case          detect uppercase terminal\n"), out);
+	fputs(_(" -w, --wait-cr              wait carriage-return\n"), out);
+	fputs(_("     --noclear              do not clear the screen before prompt\n"), out);
+	fputs(_("     --nohints              do not print hints\n"), out);
+	fputs(_("     --nonewline            do not print a newline before issue\n"), out);
+	fputs(_("     --no-hostname          no hostname at all will be shown\n"), out);
+	fputs(_("     --long-hostname        show full qualified hostname\n"), out);
+	fputs(_("     --erase-chars <string> additional backspace chars\n"), out);
+	fputs(_("     --kill-chars <string>  additional kill chars\n"), out);
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
+	fprintf(out, USAGE_MAN_TAIL("agetty(8)"));
 
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -2258,9 +2258,10 @@ static void output_special_char(unsigned char c, struct options *op,
 			if (ut->ut_type == USER_PROCESS)
 				users++;
 		endutent();
-		printf ("%d ", users);
 		if (c == 'U')
-			printf((users == 1) ? _("user") : _("users"));
+			printf(P_("%d user", "%d users", users), users);
+		else
+			printf ("%d ", users);
 		break;
 	}
 	case '4':
@@ -2381,7 +2382,7 @@ static void check_username(const char* nm)
 	return;
 err:
 	errno = EPERM;
-	log_err("checkname: %m");
+	log_err(_("checkname failed: %m"));
 }
 
 

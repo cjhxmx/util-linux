@@ -30,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ * 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  * Sun Mar 21 1999 - Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  * - fixed strerr(errno) in gettext calls
@@ -261,8 +261,7 @@ main(int argc, char **argv) {
 			udpport = optarg;
 			break;
 		case 'V':
-			printf(_("%s from %s\n"), program_invocation_short_name,
-						  PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			exit(EXIT_SUCCESS);
 		case 'h':
 			usage(stdout);

@@ -42,7 +42,7 @@
  * Revision 1.2  1995/01/03  07:33:44  johnsonm
  * revisions for lp driver updates in Linux 1.1.76
  *
- * 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ * 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  *
  * 1999-05-07 Merged LPTRUSTIRQ patch by Andrea Arcangeli (1998/11/29), aeb
@@ -246,7 +246,8 @@ int main(int argc, char **argv)
 #endif
 		case 'v':
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
+			printf(_("%s from %s\n"),
+			       program_invocation_short_name, PACKAGE_STRING);
 			return EXIT_SUCCESS;
 		default:
 			print_usage(stderr);

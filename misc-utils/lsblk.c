@@ -182,6 +182,10 @@ static size_t nincludes;
 static struct libmnt_table *mtab, *swaps;
 static struct libmnt_cache *mntcache;
 
+#ifdef HAVE_LIBUDEV
+struct udev *udev;
+#endif
+
 struct blkdev_cxt {
 	struct blkdev_cxt *parent;
 
@@ -400,13 +404,13 @@ static int get_udev_properties(struct blkdev_cxt *cxt
 #else
 static int get_udev_properties(struct blkdev_cxt *cxt)
 {
-	struct udev *udev;
 	struct udev_device *dev;
 
 	if (cxt->probed)
 		return 0;		/* already done */
 
-	udev = udev_new();
+	if (!udev)
+		udev = udev_new();
 	if (!udev)
 		return -1;
 
@@ -436,8 +440,6 @@ static int get_udev_properties(struct blkdev_cxt *cxt)
 		udev_device_unref(dev);
 		cxt->probed = 1;
 	}
-
-	udev_unref(udev);
 
 	return cxt->probed == 1 ? 0 : -1;
 
@@ -1325,31 +1327,30 @@ static void __attribute__((__noreturn__)) help(FILE *out)
 {
 	size_t i;
 
-	fprintf(out, _(
-		"\nUsage:\n"
-		" %s [options] [<device> ...]\n"), program_invocation_short_name);
-
-	fprintf(out, _(
-		"\nOptions:\n"
-		" -a, --all            print all devices\n"
-		" -b, --bytes          print SIZE in bytes rather than in human readable format\n"
-		" -d, --nodeps         don't print slaves or holders\n"
-		" -D, --discard        print discard capabilities\n"
-		" -e, --exclude <list> exclude devices by major number (default: RAM disks)\n"
-		" -I, --include <list> show only devices with specified major numbers\n"
-		" -f, --fs             output info about filesystems\n"
-		" -h, --help           usage information (this)\n"
-		" -i, --ascii          use ascii characters only\n"
-		" -m, --perms          output info about permissions\n"
-		" -l, --list           use list format output\n"
-		" -n, --noheadings     don't print headings\n"
-		" -o, --output <list>  output columns\n"
-		" -P, --pairs          use key=\"value\" output format\n"
-		" -r, --raw            use raw output format\n"
-		" -s, --inverse        inverse dependencies\n"
-		" -t, --topology       output info about topology\n"
-		" -S, --scsi           output info about SCSI devices\n"
-		" -V, --version        output version information and exit\n"));
+	fputs(USAGE_HEADER, out);
+	fprintf(out, _(" %s [options] [<device> ...]\n"), program_invocation_short_name);
+	fputs(USAGE_OPTIONS, out);
+	fputs(_(" -a, --all            print all devices\n"), out);
+	fputs(_(" -b, --bytes          print SIZE in bytes rather than in human readable format\n"), out);
+	fputs(_(" -d, --nodeps         don't print slaves or holders\n"), out);
+	fputs(_(" -D, --discard        print discard capabilities\n"), out);
+	fputs(_(" -e, --exclude <list> exclude devices by major number (default: RAM disks)\n"), out);
+	fputs(_(" -I, --include <list> show only devices with specified major numbers\n"), out);
+	fputs(_(" -f, --fs             output info about filesystems\n"), out);
+	fputs(_(" -h, --help           usage information (this)\n"), out);
+	fputs(_(" -i, --ascii          use ascii characters only\n"), out);
+	fputs(_(" -m, --perms          output info about permissions\n"), out);
+	fputs(_(" -l, --list           use list format output\n"), out);
+	fputs(_(" -n, --noheadings     don't print headings\n"), out);
+	fputs(_(" -o, --output <list>  output columns\n"), out);
+	fputs(_(" -P, --pairs          use key=\"value\" output format\n"), out);
+	fputs(_(" -r, --raw            use raw output format\n"), out);
+	fputs(_(" -s, --inverse        inverse dependencies\n"), out);
+	fputs(_(" -t, --topology       output info about topology\n"), out);
+	fputs(_(" -S, --scsi           output info about SCSI devices\n"), out);
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
 
 	fprintf(out, _("\nAvailable columns (for --output):\n"));
 
@@ -1506,8 +1507,7 @@ int main(int argc, char *argv[])
 			columns[ncolumns++] = COL_TRANSPORT;
 			break;
 		case 'V':
-			printf(_("%s from %s\n"), program_invocation_short_name,
-				PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			return EXIT_SUCCESS;
 		default:
 			help(stderr);
@@ -1566,5 +1566,8 @@ leave:
 	mnt_free_table(mtab);
 	mnt_free_table(swaps);
 	mnt_free_cache(mntcache);
+#ifdef HAVE_LIBUDEV
+	udev_unref(udev);
+#endif
 	return status;
 }

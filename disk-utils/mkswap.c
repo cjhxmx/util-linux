@@ -26,7 +26,7 @@
  * V1_MAX_PAGES fixes, jj, 990325.
  * sparc64 fixes, jj, 000219.
  *
- * 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+ * 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  *
  */
@@ -329,10 +329,7 @@ check_blocks(void)
 			page_bad(current_page);
 		current_page++;
 	}
-	if (badpages == 1)
-		printf(_("one bad page\n"));
-	else if (badpages > 1)
-		printf(_("%lu bad pages\n"), badpages);
+	printf(P_("%lu bad page\n", "%lu bad pages\n", badpages), badpages);
 	free(buffer);
 }
 
@@ -434,7 +431,7 @@ wipe_device(int fd, const char *devname, int force)
 			fprintf(stderr, _("        (%s partition table detected). "), type);
 		else
 			fprintf(stderr, _("        (compiled without libblkid). "));
-		fprintf(stderr, "Use -f to force.\n");
+		fprintf(stderr, _("Use -f to force.\n"));
 	}
 #ifdef HAVE_LIBBLKID
 	blkid_free_probe(pr);
@@ -485,19 +482,19 @@ main(int argc, char **argv) {
 			force=1;
 			break;
 		case 'p':
-			user_pagesize = strtou32_or_err(optarg, _("parse page size failed"));
+			user_pagesize = strtou32_or_err(optarg, _("parsing page size failed"));
 			break;
 		case 'L':
 			opt_label = optarg;
 			break;
 		case 'v':
-			version = strtos32_or_err(optarg, _("parse version number failed"));
+			version = strtos32_or_err(optarg, _("parsing version number failed"));
 			break;
 		case 'U':
 #ifdef HAVE_LIBUUID
 			opt_uuid = optarg;
 #else
-			warnx(_("warning: ignore -U (UUIDs are unsupported by %s)"),
+			warnx(_("warning: ignoring -U (UUIDs are unsupported by %s)"),
 				program_invocation_short_name);
 #endif
 			break;
@@ -515,18 +512,18 @@ main(int argc, char **argv) {
 	if (optind < argc)
 		block_count = argv[optind++];
 	if (optind != argc) {
-		warnx(("only one device as argument is currently supported."));
+		warnx(_("only one device argument is currently supported"));
 		usage(stderr);
 	}
 
 	if (version != 1)
 		errx(EXIT_FAILURE,
-			_("does not support swapspace version %d."), version);
+			_("swapspace version %d is not supported"), version);
 
 #ifdef HAVE_LIBUUID
 	if(opt_uuid) {
 		if (uuid_parse(opt_uuid, uuid_dat) != 0)
-			errx(EXIT_FAILURE, _("error: UUID parsing failed"));
+			errx(EXIT_FAILURE, _("error: parsing UUID failed"));
 	} else
 		uuid_generate(uuid_dat);
 	uuid = uuid_dat;
@@ -577,7 +574,7 @@ main(int argc, char **argv) {
 
 	if (is_mounted(device_name))
 		errx(EXIT_FAILURE, _("error: "
-			"%s is mounted; will not make swapspace."),
+			"%s is mounted; will not make swapspace"),
 			device_name);
 
 	if (stat(device_name, &statbuf) < 0) {

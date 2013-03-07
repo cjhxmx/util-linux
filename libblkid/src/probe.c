@@ -183,6 +183,8 @@ blkid_probe blkid_clone_probe(blkid_probe parent)
 	pr->flags = parent->flags;
 	pr->parent = parent;
 
+	pr->flags &= ~BLKID_FL_PRIVATE_FD;
+
 	return pr;
 }
 
@@ -813,6 +815,7 @@ int blkid_probe_get_idmag(blkid_probe pr, const struct blkid_idinfo *id,
 static inline void blkid_probe_start(blkid_probe pr)
 {
 	if (pr) {
+		DBG(DEBUG_LOWPROBE, printf("%p: start probe\n", pr));
 		pr->cur_chain = NULL;
 		pr->prob_flags = 0;
 		blkid_probe_set_wiper(pr, 0, 0);
@@ -822,6 +825,7 @@ static inline void blkid_probe_start(blkid_probe pr)
 static inline void blkid_probe_end(blkid_probe pr)
 {
 	if (pr) {
+		DBG(DEBUG_LOWPROBE, printf("%p: end probe\n", pr));
 		pr->cur_chain = NULL;
 		pr->prob_flags = 0;
 		blkid_probe_set_wiper(pr, 0, 0);
@@ -948,7 +952,10 @@ int blkid_do_probe(blkid_probe pr)
  *  </programlisting>
  * </example>
  *
- * Returns: 0 on success, 1 when probing is done and -1 in case of error.
+ * See also blkid_probe_step_back() if you cannot use this build-in wipe
+ * function, but you want to use libblkid probing as a source for wiping.
+ *
+ * Returns: 0 on success, and -1 in case of error.
  */
 int blkid_do_wipe(blkid_probe pr, int dryrun)
 {
@@ -1006,30 +1013,94 @@ int blkid_do_wipe(blkid_probe pr, int dryrun)
 		if (write_all(fd, buf, len))
 			return -1;
 		fsync(fd);
-
-		blkid_probe_reset_buffer(pr);
-
-		if (chn->idx >= 0) {
-			chn->idx--;
-			DBG(DEBUG_LOWPROBE,
-				printf("do_wipe: moving %s chain index to %d\n",
-				chn->driver->name,
-				chn->idx));
-		}
-		if (chn->idx == -1) {
-			/* blkid_do_probe() goes to the next chain if the index
-			 * of the current chain is -1, so we have to set the
-			 * chain pointer to the previos chain.
-			 */
-			size_t idx = chn->driver->id > 0 ?
-					chn->driver->id - 1 : 0;
-
-			if (idx > 0)
-				pr->cur_chain = &pr->chains[idx];
-			else if (idx == 0)
-				pr->cur_chain = NULL;
-		}
+		return blkid_probe_step_back(pr);
 	}
+
+	return 0;
+}
+
+/**
+ * blkid_probe_step_back():
+ * @pr: prober
+ *
+ * This function move pointer to the probing chain one step back -- it means
+ * that the previously used probing function will be called again in the next
+ * blkid_do_probe() call.
+ *
+ * This is necessary for example if you erase or modify on-disk superblock
+ * according to the current libblkid probing result.
+ *
+ * <example>
+ *  <title>wipe all superblock, but use libblkid only for probing</title>
+ *  <programlisting>
+ *      pr = blkid_new_probe_from_filename(devname);
+ *
+ *      blkid_probe_enable_superblocks(pr, 1);
+ *      blkid_probe_set_superblocks_flags(pr, BLKID_SUBLKS_MAGIC);
+ *
+ *	while (blkid_do_probe(pr) == 0) {
+ *		const char *ostr = NULL;
+ *		size_t len = 0;
+ *
+ *		// superblocks
+ *		if (blkid_probe_lookup_value(pr, "SBMAGIC_OFFSET", &ostr, NULL) == 0)
+ *			blkid_probe_lookup_value(pr, "SBMAGIC", NULL, &len);
+ *
+ *		// partition tables
+ *		if (len == 0 && blkid_probe_lookup_value(pr, "PTMAGIC_OFFSET", &ostr, NULL) == 0)
+ *			blkid_probe_lookup_value(pr, "PTMAGIC", NULL, &len);
+ *
+ *		if (!len || !str)
+ *			continue;
+ *
+ *		// convert ostr to the real offset by off = strtoll(ostr, NULL, 10);
+ *              // use your stuff to errase @len bytes at the @off
+ *              ....
+ *
+ *		// retry the last probing to check for backup superblocks ..etc.
+ *              blkid_probe_step_back(pr);
+ *	}
+ *  </programlisting>
+ * </example>
+ *
+ * Returns: 0 on success, and -1 in case of error.
+ */
+int blkid_probe_step_back(blkid_probe pr)
+{
+	struct blkid_chain *chn;
+
+	if (!pr)
+		return -1;
+
+	chn = pr->cur_chain;
+	if (!chn)
+		return -1;
+
+	blkid_probe_reset_buffer(pr);
+
+	if (chn->idx >= 0) {
+		chn->idx--;
+		DBG(DEBUG_LOWPROBE,
+			printf("step back: moving %s chain index to %d\n",
+			chn->driver->name,
+			chn->idx));
+	}
+
+	if (chn->idx == -1) {
+		/* blkid_do_probe() goes to the next chain if the index
+		 * of the current chain is -1, so we have to set the
+		 * chain pointer to the previous chain.
+		 */
+		size_t idx = chn->driver->id > 0 ? chn->driver->id - 1 : 0;
+
+		DBG(DEBUG_LOWPROBE, printf("step back: moving to previous chain\n"));
+
+		if (idx > 0)
+			pr->cur_chain = &pr->chains[idx];
+		else if (idx == 0)
+			pr->cur_chain = NULL;
+	}
+
 	return 0;
 }
 
@@ -1059,6 +1130,8 @@ int blkid_do_safeprobe(blkid_probe pr)
 		return -1;
 
 	blkid_probe_start(pr);
+
+	pr->prob_flags |= BLKID_PROBE_FL_IGNORE_BACKUP;
 
 	for (i = 0; i < BLKID_NCHAINS; i++) {
 		struct blkid_chain *chn;
@@ -1590,6 +1663,24 @@ size_t blkid_rtrim_whitespace(unsigned char *str)
 	return i;
 }
 
+/* Removes whitespace from the left-hand side of a string.
+ *
+ * Returns size of the new string (without \0).
+ */
+size_t blkid_ltrim_whitespace(unsigned char *str)
+{
+	size_t len;
+	unsigned char *p;
+
+	for (p = str; p && isspace(*p); p++);
+
+	len = strlen((char *) p);
+
+	if (len && p > str)
+		memmove(str, p, len + 1);
+
+	return len;
+}
 /*
  * Some mkfs-like utils wipe some parts (usually begin) of the device.
  * For example LVM (pvcreate) or mkswap(8). This information could be used
@@ -1682,3 +1773,7 @@ void blkid_probe_use_wiper(blkid_probe pr, blkid_loff_t off, blkid_loff_t size)
 	}
 }
 
+int blkid_probe_ignore_backup(blkid_probe pr)
+{
+	return pr && (pr->prob_flags & BLKID_PROBE_FL_IGNORE_BACKUP);
+}

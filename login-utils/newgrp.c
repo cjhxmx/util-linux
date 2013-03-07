@@ -2,7 +2,7 @@
  * Added a bit more error recovery/reporting - poe
  * Vesa Roukonen added code for asking password */
 
-/* 1999-02-22 Arkadiusz Mi∂kiewicz <misiek@pld.ORG.PL>
+/* 1999-02-22 Arkadiusz Mi≈õkiewicz <misiek@pld.ORG.PL>
  * - added Native Language Support
  */
 
@@ -98,10 +98,14 @@ static int allow_setgid(struct passwd *pe, struct group *ge)
 	if (!(pwd = get_gshadow_pwd(ge->gr_name)))
 		pwd = ge->gr_passwd;
 
-	if (pwd && *pwd && (xpwd = getpass(_("Password: "))))
-		if (strcmp(pwd, crypt(xpwd, pwd)) == 0)
-			/* password accepted */
+	if (pwd && *pwd && (xpwd = getpass(_("Password: ")))) {
+		char *cbuf = crypt(xpwd, pwd);
+
+		if (!cbuf)
+			warn(_("crypt() failed"));
+		else if (strcmp(pwd, cbuf) == 0)
 			return TRUE;
+	}
 
 	/* default to denial */
 	return FALSE;
@@ -178,7 +182,7 @@ int main(int argc, char *argv[])
 	fflush(stdout);
 	fflush(stderr);
 	execl(shell, shell, (char *)0);
-	warn(_("exec %s failed"), shell);
+	warn(_("failed to execute %s"), shell);
 	fflush(stderr);
 
 	return EXIT_FAILURE;
