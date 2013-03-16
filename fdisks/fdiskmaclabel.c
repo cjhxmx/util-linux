@@ -16,6 +16,13 @@
 
 #define MAC_BITMASK 0xffff0000
 
+/*
+ * in-memory fdisk mac stuff
+ */
+struct fdisk_mac_label {
+	struct fdisk_label	head;		/* generic part */
+};
+
 
 static	int     other_endian = 0;
 static  short	volumes=1;
@@ -44,7 +51,6 @@ mac_nolabel(struct fdisk_context *cxt)
     struct mac_partition *maclabel = (struct mac_partition *) cxt->firstsector;
 
     maclabel->magic = 0;
-    partitions = 4;
     fdisk_zeroize_firstsector(cxt);
     return;
 }
@@ -76,8 +82,6 @@ mac_probe_label(struct fdisk_context *cxt)
 
 IS_MAC:
     other_endian = (maclabel->magic == MAC_LABEL_MAGIC_SWAPPED); // =?
-    cxt->disklabel = FDISK_DISKLABEL_MAC;
-    partitions= 1016; // =?
     volumes = 15;	// =?
     mac_info();
     mac_nolabel(cxt);		/* %% */
@@ -85,9 +89,9 @@ IS_MAC:
 }
 
 static int mac_add_partition(
-			struct fdisk_context *cxt __attribute__ ((__unused__)),
-			int partnum __attribute__ ((__unused__)),
-			struct fdisk_parttype *t __attribute__ ((__unused__)))
+		struct fdisk_context *cxt __attribute__ ((__unused__)),
+		size_t partnum __attribute__ ((__unused__)),
+		struct fdisk_parttype *t __attribute__ ((__unused__)))
 {
 	printf(_("\tSorry - this fdisk cannot handle Mac disk labels."
 		 "\n\tIf you want to add DOS-type partitions, create"
@@ -98,13 +102,32 @@ static int mac_add_partition(
 	return -ENOSYS;
 }
 
-const struct fdisk_label mac_label =
+static const struct fdisk_label_operations mac_operations =
 {
-	.name = "mac",
-	.probe = mac_probe_label,
-	.write = NULL,
-	.verify = NULL,
-	.create = NULL,
-	.part_add = mac_add_partition,
-	.part_delete = NULL,
+	.probe		= mac_probe_label,
+	.part_add	= mac_add_partition
 };
+
+
+/*
+ * allocates MAC label driver
+ */
+struct fdisk_label *fdisk_new_mac_label(struct fdisk_context *cxt)
+{
+	struct fdisk_label *lb;
+	struct fdisk_mac_label *mac;
+
+	assert(cxt);
+
+	mac = calloc(1, sizeof(*mac));
+	if (!mac)
+		return NULL;
+
+	/* initialize generic part of the driver */
+	lb = (struct fdisk_label *) mac;
+	lb->name = "mac";
+	lb->id = FDISK_DISKLABEL_MAC;
+	lb->op = &mac_operations;
+
+	return lb;
+}

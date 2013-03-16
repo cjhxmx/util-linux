@@ -7,8 +7,7 @@ fdisk_SOURCES = \
 	fdisks/dos_part_types.h \
 	fdisks/fdisk.c \
 	fdisks/fdisk.h \
-	fdisks/fdiskaixlabel.c \
-	fdisks/fdiskaixlabel.h \
+	fdisks/fdisk-ask.c \
 	fdisks/fdiskbsdlabel.c \
 	fdisks/fdiskbsdlabel.h \
 	fdisks/fdiskdoslabel.c \
@@ -19,14 +18,11 @@ fdisk_SOURCES = \
 	fdisks/fdisksgilabel.h \
 	fdisks/fdisksunlabel.c \
 	fdisks/fdisksunlabel.h \
-	fdisks/gpt.c \
-	fdisks/gpt.h \
 	fdisks/partname.c \
-	fdisks/utils.c \
 	fdisks/common.h
 
-fdisk_LDADD = $(LDADD) libcommon.la
-fdisk_CFLAGS = $(AM_CFLAGS)
+fdisk_LDADD = $(LDADD) libcommon.la libfdisk.la
+fdisk_CFLAGS = $(AM_CFLAGS) -I$(ul_libfdisk_incdir)
 
 if BUILD_LIBBLKID
 fdisk_CFLAGS += -I$(ul_libblkid_incdir)

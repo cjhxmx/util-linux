@@ -37,7 +37,6 @@
 
 #include "fdisksunlabel.h"
 #include "fdisksgilabel.h"
-#include "fdiskaixlabel.h"
 #include "fdiskmaclabel.h"
 #include "fdiskdoslabel.h"
 #include "fdiskbsdlabel.h"
@@ -49,20 +48,6 @@
 #include <linux/blkpg.h>
 #endif
 
-#include "gpt.h"
-
-int MBRbuffer_changed;
-
-#define hex_val(c)	({ \
-				char _c = (c); \
-				isdigit(_c) ? _c - '0' : \
-				tolower(_c) + 10 - 'a'; \
-			})
-
-
-#define sector(s)	((s) & 0x3f)
-#define cylinder(s, c)	((c) | (((s) & 0xc0) << 2))
-
 /* menu list description */
 
 struct menulist_descr {
@@ -72,25 +57,26 @@ struct menulist_descr {
 };
 
 static const struct menulist_descr menulist[] = {
+	{'a', N_("change number of alternate cylinders"), {0, FDISK_DISKLABEL_SUN}},
+	{'a', N_("select bootable partition"), {FDISK_DISKLABEL_SGI, 0}},
 	{'a', N_("toggle a bootable flag"), {FDISK_DISKLABEL_DOS, 0}},
 	{'a', N_("toggle a read only flag"), {FDISK_DISKLABEL_SUN, 0}},
-	{'a', N_("select bootable partition"), {FDISK_DISKLABEL_SGI, 0}},
-	{'a', N_("change number of alternate cylinders"), {0, FDISK_DISKLABEL_SUN}},
-	{'b', N_("edit bsd disklabel"), {FDISK_DISKLABEL_DOS, 0}},
 	{'b', N_("edit bootfile entry"), {FDISK_DISKLABEL_SGI, 0}},
+	{'b', N_("edit bsd disklabel"), {FDISK_DISKLABEL_DOS, 0}},
 	{'b', N_("move beginning of data in a partition"), {0, FDISK_DISKLABEL_DOS}},
+	{'c', N_("change number of cylinders"), {0, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN}},
+	{'c', N_("select sgi swap partition"), {FDISK_DISKLABEL_SGI, 0}},
 	{'c', N_("toggle the dos compatibility flag"), {FDISK_DISKLABEL_DOS, 0}},
 	{'c', N_("toggle the mountable flag"), {FDISK_DISKLABEL_SUN, 0}},
-	{'c', N_("select sgi swap partition"), {FDISK_DISKLABEL_SGI, 0}},
-	{'c', N_("change number of cylinders"), {0, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN}},
 	{'d', N_("delete a partition"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF | FDISK_DISKLABEL_GPT, 0}},
 	{'d', N_("print the raw data in the partition table"), {0, FDISK_DISKLABEL_ANY}},
 	{'e', N_("change number of extra sectors per cylinder"), {0, FDISK_DISKLABEL_SUN}},
-	{'e', N_("list extended partitions"), {0, FDISK_DISKLABEL_DOS}},
 	{'e', N_("edit drive data"), {FDISK_DISKLABEL_OSF, 0}},
+	{'e', N_("list extended partitions"), {0, FDISK_DISKLABEL_DOS}},
 	{'f', N_("fix partition order"), {0, FDISK_DISKLABEL_DOS}},
-	{'g', N_("create an IRIX (SGI) partition table"), {0, FDISK_DISKLABEL_ANY}},
 	{'g', N_("create a new empty GPT partition table"), {~FDISK_DISKLABEL_OSF, 0}},
+	{'g', N_("create an IRIX (SGI) partition table"), {0, FDISK_DISKLABEL_ANY}}, /* for backward compatibility only */
+	{'G', N_("create an IRIX (SGI) partition table"), {~FDISK_DISKLABEL_OSF, 0}},
 	{'h', N_("change number of heads"), {0, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN}},
 	{'i', N_("change interleave factor"), {0, FDISK_DISKLABEL_SUN}},
 	{'i', N_("change the disk identifier"), {0, FDISK_DISKLABEL_DOS}},
@@ -98,19 +84,19 @@ static const struct menulist_descr menulist[] = {
 	{'l', N_("list known partition types"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF  | FDISK_DISKLABEL_GPT, 0}},
 	{'m', N_("print this menu"), {FDISK_DISKLABEL_ANY, FDISK_DISKLABEL_ANY}},
 	{'n', N_("add a new partition"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF | FDISK_DISKLABEL_GPT, 0}},
-	{'o', N_("create a new empty DOS partition table"), {~FDISK_DISKLABEL_OSF, 0}},
 	{'o', N_("change rotation speed (rpm)"), {0, FDISK_DISKLABEL_SUN}},
+	{'o', N_("create a new empty DOS partition table"), {~FDISK_DISKLABEL_OSF, 0}},
 	{'p', N_("print the partition table"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN}},
 	{'q', N_("quit without saving changes"), {FDISK_DISKLABEL_ANY, FDISK_DISKLABEL_ANY}},
 	{'r', N_("return to main menu"), {FDISK_DISKLABEL_OSF, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF}},
-	{'s', N_("create a new empty Sun disklabel"), {~FDISK_DISKLABEL_OSF, 0}},
 	{'s', N_("change number of sectors/track"), {0, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN}},
+	{'s', N_("create a new empty Sun disklabel"), {~FDISK_DISKLABEL_OSF, 0}},
 	{'s', N_("show complete disklabel"), {FDISK_DISKLABEL_OSF, 0}},
 	{'t', N_("change a partition's system id"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF, 0}},
 	{'u', N_("change display/entry units"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI | FDISK_DISKLABEL_OSF, 0}},
 	{'v', N_("verify the partition table"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI}},
-	{'w', N_("write table to disk and exit"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI  | FDISK_DISKLABEL_GPT, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI}},
 	{'w', N_("write disklabel to disk"), {FDISK_DISKLABEL_OSF, 0}},
+	{'w', N_("write table to disk and exit"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI  | FDISK_DISKLABEL_GPT, FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI}},
 	{'x', N_("extra functionality (experts only)"), {FDISK_DISKLABEL_DOS | FDISK_DISKLABEL_SUN | FDISK_DISKLABEL_SGI, 0}},
 #if !defined (__alpha__)
 	{'x', N_("link BSD partition to non-BSD partition"), {FDISK_DISKLABEL_OSF, 0}},
@@ -127,11 +113,21 @@ sector_t get_nr_sects(struct partition *p) {
 char	*line_ptr,			/* interactive input */
 	line_buffer[LINE_LENGTH];
 
-int	nowarn = 0,			/* no warnings for fdisk -l/-s */
-	dos_compatible_flag = 0,	/* disabled by default */
-	partitions = 4;			/* maximum partition + 1 */
+int	nowarn = 0;			/* no warnings for fdisk -l/-s */
 
 unsigned int	user_cylinders, user_heads, user_sectors;
+
+void toggle_units(struct fdisk_context *cxt)
+{
+	fdisk_context_set_unit(cxt,
+		fdisk_context_use_cylinders(cxt) ? "sectors" :
+						   "cylinders");
+	if (fdisk_context_use_cylinders(cxt))
+		fdisk_info(cxt, _("Changing display/entry units to cylinders (DEPRECATED!)."));
+	else
+		fdisk_info(cxt, _("Changing display/entry units to sectors."));
+}
+
 
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
@@ -179,41 +175,17 @@ get_part_table(int i) {
 	return ptes[i].part_table;
 }
 
-void
-set_all_unchanged(void) {
-	int i;
-
-	for (i = 0; i < MAXIMUM_PARTS; i++)
-		ptes[i].changed = 0;
-}
-
-void
-set_changed(int i) {
-	ptes[i].changed = 1;
-}
-
-static int
-is_garbage_table(void) {
-	int i;
-
-	for (i = 0; i < 4; i++) {
-		struct pte *pe = &ptes[i];
-		struct partition *p = pe->part_table;
-
-		if (p->boot_ind != 0 && p->boot_ind != 0x80)
-			return 1;
-	}
-	return 0;
-}
-
 void print_menu(struct fdisk_context *cxt, enum menutype menu)
 {
 	size_t i;
+	int id;
 
 	puts(_("Command action"));
 
+	id = cxt && cxt->label ?  cxt->label->id : FDISK_DISKLABEL_ANY;
+
 	for (i = 0; i < ARRAY_SIZE(menulist); i++)
-		if (menulist[i].label[menu] & cxt->disklabel)
+		if (menulist[i].label[menu] & id)
 			printf("   %c   %s\n", menulist[i].command, menulist[i].description);
 }
 
@@ -288,86 +260,6 @@ test_c(char **m, char *mesg) {
 	return val;
 }
 
-static int
-lba_is_aligned(struct fdisk_context *cxt, sector_t lba)
-{
-	unsigned int granularity = max(cxt->phy_sector_size, cxt->min_io_size);
-	unsigned long long offset;
-
-	if (cxt->grain > granularity)
-		granularity = cxt->grain;
-	offset = (lba * cxt->sector_size) & (granularity - 1);
-
-	return !((granularity + cxt->alignment_offset - offset) & (granularity - 1));
-}
-
-static int
-lba_is_phy_aligned(struct fdisk_context *cxt, unsigned long long lba)
-{
-	unsigned int granularity = max(cxt->phy_sector_size, cxt->min_io_size);
-	unsigned long long offset = (lba * cxt->sector_size) & (granularity - 1);
-
-	return !((granularity + cxt->alignment_offset - offset) & (granularity - 1));
-}
-
-sector_t align_lba(struct fdisk_context *cxt, sector_t lba, int direction)
-{
-	sector_t res;
-
-	if (lba_is_aligned(cxt, lba))
-		res = lba;
-	else {
-		sector_t sects_in_phy = cxt->grain / cxt->sector_size;
-
-		if (lba < cxt->first_lba)
-			res = cxt->first_lba;
-
-		else if (direction == ALIGN_UP)
-			res = ((lba + sects_in_phy) / sects_in_phy) * sects_in_phy;
-
-		else if (direction == ALIGN_DOWN)
-			res = (lba / sects_in_phy) * sects_in_phy;
-
-		else /* ALIGN_NEAREST */
-			res = ((lba + sects_in_phy / 2) / sects_in_phy) * sects_in_phy;
-
-		if (cxt->alignment_offset && !lba_is_aligned(cxt, res) &&
-		    res > cxt->alignment_offset / cxt->sector_size) {
-			/*
-			 * apply alignment_offset
-			 *
-			 * On disk with alignment compensation physical blocks starts
-			 * at LBA < 0 (usually LBA -1). It means we have to move LBA
-			 * according the offset to be on the physical boundary.
-			 */
-			/* fprintf(stderr, "LBA: %llu apply alignment_offset\n", res); */
-			res -= (max(cxt->phy_sector_size, cxt->min_io_size) -
-					cxt->alignment_offset) / cxt->sector_size;
-
-			if (direction == ALIGN_UP && res < lba)
-				res += sects_in_phy;
-		}
-	}
-
-	return res;
-}
-
-
-sector_t align_lba_in_range(struct fdisk_context *cxt,
-			    sector_t lba, sector_t start, sector_t stop)
-{
-	start = align_lba(cxt, start, ALIGN_UP);
-	stop = align_lba(cxt, stop, ALIGN_DOWN);
-
-	lba = align_lba(cxt, lba, ALIGN_NEAREST);
-
-	if (lba < start)
-		return start;
-	else if (lba > stop)
-		return stop;
-	return lba;
-}
-
 int warn_geometry(struct fdisk_context *cxt)
 {
 	char *m = NULL;
@@ -408,42 +300,37 @@ void warn_limits(struct fdisk_context *cxt)
 	}
 }
 
-static int is_partition_table_changed(void)
-{
-	int i;
-
-	for (i = 0; i < partitions; i++)
-		if (ptes[i].changed)
-			return 1;
-	return 0;
-}
-
-static void maybe_exit(int rc, int *asked)
+static void maybe_exit(struct fdisk_context *cxt, int rc, int *asked)
 {
 	char line[LINE_LENGTH];
+
+	assert(cxt);
+	assert(cxt->label);
 
 	putchar('\n');
 	if (asked)
 		*asked = 0;
 
-	if (is_partition_table_changed() || MBRbuffer_changed) {
+	if (fdisk_label_is_changed(cxt->label)) {
 		fprintf(stderr, _("Do you really want to quit? "));
 
 		if (!fgets(line, LINE_LENGTH, stdin) || rpmatch(line) == 1)
-			exit(rc);
+			goto leave;
 		if (asked)
 			*asked = 1;
-	} else
-		exit(rc);
+		return;
+	}
+leave:
+	fdisk_free_context(cxt);
+	exit(rc);
 }
 
 /* read line; return 0 or first char */
-int
-read_line(int *asked)
+int read_line(struct fdisk_context *cxt, int *asked)
 {
 	line_ptr = line_buffer;
 	if (!fgets(line_buffer, LINE_LENGTH, stdin)) {
-		maybe_exit(1, asked);
+		maybe_exit(cxt, 1, asked);
 		return 0;
 	}
 	if (asked)
@@ -453,25 +340,25 @@ read_line(int *asked)
 	return *line_ptr;
 }
 
-char
-read_char(char *mesg)
+char read_char(struct fdisk_context *cxt, char *mesg)
 {
 	do {
 		fputs(mesg, stdout);
 		fflush (stdout);	 /* requested by niles@scyld.com */
-	} while (!read_line(NULL));
+
+	} while (!read_line(cxt, NULL));
+
 	return *line_ptr;
 }
 
-char
-read_chars(char *mesg)
+char read_chars(struct fdisk_context *cxt, char *mesg)
 {
 	int rc, asked = 0;
 
 	do {
 	        fputs(mesg, stdout);
 		fflush (stdout);	/* niles@scyld.com */
-		rc = read_line(&asked);
+		rc = read_line(cxt, &asked);
 	} while (asked);
 
 	if (!rc) {
@@ -490,9 +377,9 @@ struct fdisk_parttype *read_partition_type(struct fdisk_context *cxt)
 		size_t sz;
 
 		if (cxt->label->parttypes[0].typestr)
-			read_chars(_("Partition type (type L to list all types): "));
+			read_chars(cxt, _("Partition type (type L to list all types): "));
 		else
-			read_chars(_("Hex code (type L to list all codes): "));
+			read_chars(cxt, _("Hex code (type L to list all codes): "));
 
 		sz = strlen(line_ptr);
 		if (!sz || line_ptr[sz - 1] != '\n' || sz == 1)
@@ -539,7 +426,7 @@ read_int_with_suffix(struct fdisk_context *cxt,
 		int use_default = default_ok;
 
 		/* ask question and read answer */
-		while (read_chars(ms) != '\n' && !isdigit(*line_ptr)
+		while (read_chars(cxt, ms) != '\n' && !isdigit(*line_ptr)
 		       && *line_ptr != '-' && *line_ptr != '+')
 			continue;
 
@@ -566,7 +453,7 @@ read_int_with_suffix(struct fdisk_context *cxt,
 				/*
 				 * Cylinders
 				 */
-				if (!display_in_cyl_units)
+				if (fdisk_context_use_cylinders(cxt))
 					res *= cxt->geom.heads * cxt->geom.sectors;
 			} else if (*line_ptr &&
 				   *(line_ptr + 1) == 'B' &&
@@ -610,7 +497,7 @@ read_int_with_suffix(struct fdisk_context *cxt,
 				unsigned long unit;
 
 				bytes = (unsigned long long) res * absolute;
-				unit = cxt->sector_size * units_per_sector;
+				unit = cxt->sector_size * fdisk_context_get_units_per_sector(cxt);
 				bytes += unit/2;	/* round */
 				bytes /= unit;
 				res = bytes;
@@ -654,97 +541,25 @@ read_int(struct fdisk_context *cxt,
 	return read_int_with_suffix(cxt, low, dflt, high, base, mesg, NULL);
 }
 
-int
-get_partition_dflt(struct fdisk_context *cxt, int warn, int max, int dflt) {
-	struct pte *pe;
-	int i;
-
-	i = read_int(cxt, 1, dflt, max, 0, _("Partition number")) - 1;
-	pe = &ptes[i];
-
-	if (warn && !fdisk_is_disklabel(cxt, GPT)) {
-		if ((!fdisk_is_disklabel(cxt, SUN) &&
-		     !fdisk_is_disklabel(cxt, SGI) && !pe->part_table->sys_ind)
-		    || (fdisk_is_disklabel(cxt, SUN) &&
-			(!sunlabel->partitions[i].num_sectors ||
-			 !sunlabel->part_tags[i].tag))
-		    || (fdisk_is_disklabel(cxt, SGI) &&
-			(!sgi_get_num_sectors(cxt, i))))
-			fprintf(stderr,
-				_("Warning: partition %d has empty type\n"),
-				i+1);
-	}
-	return i;
-}
-
-int
-get_partition(struct fdisk_context *cxt, int warn, int max) {
-	return get_partition_dflt(cxt, warn, max, 0);
-}
-
-/* User partition selection unless one partition only is available */
-
-static int
-get_existing_partition(struct fdisk_context *cxt, int warn, int max) {
-	int pno = -1;
-	int i;
-
-	if (!fdisk_is_disklabel(cxt, DOS))
-		goto not_implemented;
-
-	for (i = 0; i < max; i++) {
-		struct pte *pe = &ptes[i];
-		struct partition *p = pe->part_table;
-
-		if (p && !is_cleared_partition(p)) {
-			if (pno >= 0)
-				goto not_unique;
-			pno = i;
-		}
-	}
-
-	if (pno >= 0) {
-		printf(_("Selected partition %d\n"), pno+1);
-		return pno;
-	}
-	printf(_("No partition is defined yet!\n"));
-	return -1;
-
-not_implemented:
-not_unique:
-	return get_partition(cxt, warn, max);
-}
-
-const char *
-str_units(int n)
+static void toggle_dos_compatibility_flag(struct fdisk_context *cxt)
 {
-	if (display_in_cyl_units)
-		return P_("cylinder", "cylinders", n);
-	return P_("sector", "sectors", n);
-}
+	struct fdisk_label *lb = fdisk_context_get_label(cxt, "dos");
+	int flag;
 
-static void
-toggle_active(int i) {
-	struct pte *pe = &ptes[i];
-	struct partition *p = pe->part_table;
+	if (!lb)
+		return;
 
-	if (IS_EXTENDED (p->sys_ind) && !p->boot_ind)
-		fprintf(stderr,
-			_("WARNING: Partition %d is an extended partition\n"),
-			i + 1);
-	p->boot_ind = (p->boot_ind ? 0 : ACTIVE_FLAG);
-	pe->changed = 1;
-}
+	flag = !fdisk_dos_is_compatible(lb);
 
-static void
-toggle_dos_compatibility_flag(struct fdisk_context *cxt) {
-	dos_compatible_flag = ~dos_compatible_flag;
-	if (dos_compatible_flag)
+	if (flag)
 		printf(_("DOS Compatibility flag is set (DEPRECATED!)\n"));
 	else
 		printf(_("DOS Compatibility flag is not set\n"));
 
-	fdisk_reset_alignment(cxt);
+	fdisk_dos_enable_compatible(lb, flag);
+
+	if (fdisk_is_disklabel(cxt, DOS))
+		fdisk_reset_alignment(cxt);
 }
 
 static void delete_partition(struct fdisk_context *cxt, int partnum)
@@ -761,16 +576,18 @@ static void delete_partition(struct fdisk_context *cxt, int partnum)
 
 static void change_partition_type(struct fdisk_context *cxt)
 {
-	int i;
+	size_t i;
 	struct fdisk_parttype *t, *org_t;
 
-	i = get_existing_partition(cxt, 0, partitions);
-	if (i == -1)
+	assert(cxt);
+	assert(cxt->label);
+
+	if (fdisk_ask_partnum(cxt, &i, FALSE))
 		return;
 
 	org_t = t = fdisk_get_partition_type(cxt, i);
 	if (!t)
-                printf(_("Partition %d does not exist yet!\n"), i + 1);
+                printf(_("Partition %zu does not exist yet!\n"), i + 1);
 
         else do {
 		t = read_partition_type(cxt);
@@ -783,7 +600,7 @@ static void change_partition_type(struct fdisk_context *cxt)
 				org_t ? org_t->name : _("Unknown"),
 				    t ?     t->name : _("Unknown"));
 		} else {
-			printf (_("Type of partition %d is unchanged: %s\n"),
+			printf (_("Type of partition %zu is unchanged: %s\n"),
 				i + 1,
 				org_t ? org_t->name : _("Unknown"));
 		}
@@ -792,81 +609,6 @@ static void change_partition_type(struct fdisk_context *cxt)
 
 	fdisk_free_parttype(t);
 	fdisk_free_parttype(org_t);
-}
-
-/* check_consistency() and long2chs() added Sat Mar 6 12:28:16 1993,
- * faith@cs.unc.edu, based on code fragments from pfdisk by Gordon W. Ross,
- * Jan.  1990 (version 1.2.1 by Gordon W. Ross Aug. 1990; Modified by S.
- * Lubkin Oct.  1991). */
-
-static void
-long2chs(struct fdisk_context *cxt, unsigned long ls,
-	 unsigned int *c, unsigned int *h, unsigned int *s) {
-	int spc = cxt->geom.heads * cxt->geom.sectors;
-
-	*c = ls / spc;
-	ls = ls % spc;
-	*h = ls / cxt->geom.sectors;
-	*s = ls % cxt->geom.sectors + 1;	/* sectors count from 1 */
-}
-
-void check_consistency(struct fdisk_context *cxt, struct partition *p, int partition)
-{
-	unsigned int pbc, pbh, pbs;	/* physical beginning c, h, s */
-	unsigned int pec, peh, pes;	/* physical ending c, h, s */
-	unsigned int lbc, lbh, lbs;	/* logical beginning c, h, s */
-	unsigned int lec, leh, les;	/* logical ending c, h, s */
-
-	if (!dos_compatible_flag)
-		return;
-
-	if (!cxt->geom.heads || !cxt->geom.sectors || (partition >= 4))
-		return;		/* do not check extended partitions */
-
-/* physical beginning c, h, s */
-	pbc = (p->cyl & 0xff) | ((p->sector << 2) & 0x300);
-	pbh = p->head;
-	pbs = p->sector & 0x3f;
-
-/* physical ending c, h, s */
-	pec = (p->end_cyl & 0xff) | ((p->end_sector << 2) & 0x300);
-	peh = p->end_head;
-	pes = p->end_sector & 0x3f;
-
-/* compute logical beginning (c, h, s) */
-	long2chs(cxt, get_start_sect(p), &lbc, &lbh, &lbs);
-
-/* compute logical ending (c, h, s) */
-	long2chs(cxt, get_start_sect(p) + get_nr_sects(p) - 1, &lec, &leh, &les);
-
-/* Same physical / logical beginning? */
-	if (cxt->geom.cylinders <= 1024 && (pbc != lbc || pbh != lbh || pbs != lbs)) {
-		printf(_("Partition %d has different physical/logical "
-			"beginnings (non-Linux?):\n"), partition + 1);
-		printf(_("     phys=(%d, %d, %d) "), pbc, pbh, pbs);
-		printf(_("logical=(%d, %d, %d)\n"),lbc, lbh, lbs);
-	}
-
-/* Same physical / logical ending? */
-	if (cxt->geom.cylinders <= 1024 && (pec != lec || peh != leh || pes != les)) {
-		printf(_("Partition %d has different physical/logical "
-			"endings:\n"), partition + 1);
-		printf(_("     phys=(%d, %d, %d) "), pec, peh, pes);
-		printf(_("logical=(%d, %d, %d)\n"),lec, leh, les);
-	}
-
-/* Ending on cylinder boundary? */
-	if (peh != (cxt->geom.heads - 1) || pes != cxt->geom.sectors) {
-		printf(_("Partition %i does not end on cylinder boundary.\n"),
-			partition + 1);
-	}
-}
-
-void check_alignment(struct fdisk_context *cxt, sector_t lba, int partition)
-{
-	if (!lba_is_phy_aligned(cxt, lba))
-		printf(_("Partition %i does not start on physical sector boundary.\n"),
-			partition + 1);
 }
 
 static void
@@ -883,12 +625,14 @@ list_disk_geometry(struct fdisk_context *cxt) {
 		       cxt->dev_path, hectomega / 10, hectomega % 10, bytes);
 	}
 	printf(_(", %llu sectors\n"), cxt->total_sectors);
-	if (dos_compatible_flag)
+	if (is_dos_compatible(cxt))
 		printf(_("%d heads, %llu sectors/track, %llu cylinders\n"),
 		       cxt->geom.heads, cxt->geom.sectors, cxt->geom.cylinders);
 	printf(_("Units = %s of %d * %ld = %ld bytes\n"),
-	       str_units(PLURAL),
-	       units_per_sector, cxt->sector_size, units_per_sector * cxt->sector_size);
+	       fdisk_context_get_unit(cxt, PLURAL),
+	       fdisk_context_get_units_per_sector(cxt),
+	       cxt->sector_size,
+	       fdisk_context_get_units_per_sector(cxt) * cxt->sector_size);
 
 	printf(_("Sector size (logical/physical): %lu bytes / %lu bytes\n"),
 				cxt->sector_size, cxt->phy_sector_size);
@@ -903,146 +647,8 @@ list_disk_geometry(struct fdisk_context *cxt) {
 	printf("\n");
 }
 
-/*
- * Check whether partition entries are ordered by their starting positions.
- * Return 0 if OK. Return i if partition i should have been earlier.
- * Two separate checks: primary and logical partitions.
- */
-static int
-wrong_p_order(int *prev) {
-	struct pte *pe;
-	struct partition *p;
-	unsigned int last_p_start_pos = 0, p_start_pos;
-	int i, last_i = 0;
-
-	for (i = 0 ; i < partitions; i++) {
-		if (i == 4) {
-			last_i = 4;
-			last_p_start_pos = 0;
-		}
-		pe = &ptes[i];
-		if ((p = pe->part_table)->sys_ind) {
-			p_start_pos = get_partition_start(pe);
-
-			if (last_p_start_pos > p_start_pos) {
-				if (prev)
-					*prev = last_i;
-				return i;
-			}
-
-			last_p_start_pos = p_start_pos;
-			last_i = i;
-		}
-	}
-	return 0;
-}
-
-/*
- * Fix the chain of logicals.
- * extended_offset is unchanged, the set of sectors used is unchanged
- * The chain is sorted so that sectors increase, and so that
- * starting sectors increase.
- *
- * After this it may still be that cfdisk doesn't like the table.
- * (This is because cfdisk considers expanded parts, from link to
- * end of partition, and these may still overlap.)
- * Now
- *   sfdisk /dev/hda > ohda; sfdisk /dev/hda < ohda
- * may help.
- */
-static void
-fix_chain_of_logicals(void) {
-	int j, oj, ojj, sj, sjj;
-	struct partition *pj,*pjj,tmp;
-
-	/* Stage 1: sort sectors but leave sector of part 4 */
-	/* (Its sector is the global extended_offset.) */
- stage1:
-	for (j = 5; j < partitions-1; j++) {
-		oj = ptes[j].offset;
-		ojj = ptes[j+1].offset;
-		if (oj > ojj) {
-			ptes[j].offset = ojj;
-			ptes[j+1].offset = oj;
-			pj = ptes[j].part_table;
-			set_start_sect(pj, get_start_sect(pj)+oj-ojj);
-			pjj = ptes[j+1].part_table;
-			set_start_sect(pjj, get_start_sect(pjj)+ojj-oj);
-			set_start_sect(ptes[j-1].ext_pointer,
-				       ojj-extended_offset);
-			set_start_sect(ptes[j].ext_pointer,
-				       oj-extended_offset);
-			goto stage1;
-		}
-	}
-
-	/* Stage 2: sort starting sectors */
- stage2:
-	for (j = 4; j < partitions-1; j++) {
-		pj = ptes[j].part_table;
-		pjj = ptes[j+1].part_table;
-		sj = get_start_sect(pj);
-		sjj = get_start_sect(pjj);
-		oj = ptes[j].offset;
-		ojj = ptes[j+1].offset;
-		if (oj+sj > ojj+sjj) {
-			tmp = *pj;
-			*pj = *pjj;
-			*pjj = tmp;
-			set_start_sect(pj, ojj+sjj-oj);
-			set_start_sect(pjj, oj+sj-ojj);
-			goto stage2;
-		}
-	}
-
-	/* Probably something was changed */
-	for (j = 4; j < partitions; j++)
-		ptes[j].changed = 1;
-}
-
-static void
-fix_partition_table_order(void) {
-	struct pte *pei, *pek;
-	int i,k;
-
-	if (!wrong_p_order(NULL)) {
-		printf(_("Nothing to do. Ordering is correct already.\n\n"));
-		return;
-	}
-
-	while ((i = wrong_p_order(&k)) != 0 && i < 4) {
-		/* partition i should have come earlier, move it */
-		/* We have to move data in the MBR */
-		struct partition *pi, *pk, *pe, pbuf;
-		pei = &ptes[i];
-		pek = &ptes[k];
-
-		pe = pei->ext_pointer;
-		pei->ext_pointer = pek->ext_pointer;
-		pek->ext_pointer = pe;
-
-		pi = pei->part_table;
-		pk = pek->part_table;
-
-		memmove(&pbuf, pi, sizeof(struct partition));
-		memmove(pi, pk, sizeof(struct partition));
-		memmove(pk, &pbuf, sizeof(struct partition));
-
-		pei->changed = pek->changed = 1;
-	}
-
-	if (i)
-		fix_chain_of_logicals();
-
-	printf(_("Done.\n"));
-
-}
-
 static void list_table(struct fdisk_context *cxt, int xtra)
 {
-	struct partition *p;
-	int i, w;
-
 	if (fdisk_is_disklabel(cxt, SUN)) {
 		sun_list_table(cxt, xtra);
 		return;
@@ -1065,136 +671,8 @@ static void list_table(struct fdisk_context *cxt, int xtra)
 		return;
 	}
 
-	if (is_garbage_table()) {
-		printf(_("This doesn't look like a partition table\n"
-			 "Probably you selected the wrong device.\n\n"));
-	}
-
-	/* Heuristic: we list partition 3 of /dev/foo as /dev/foo3,
-	   but if the device name ends in a digit, say /dev/foo1,
-	   then the partition is called /dev/foo1p3. */
-	w = strlen(cxt->dev_path);
-	if (w && isdigit(cxt->dev_path[w-1]))
-		w++;
-	if (w < 5)
-		w = 5;
-
-	printf(_("%*s Boot      Start         End      Blocks   Id  System\n"),
-	       w+1, _("Device"));
-
-	for (i = 0; i < partitions; i++) {
-		struct pte *pe = &ptes[i];
-
-		p = pe->part_table;
-		if (p && !is_cleared_partition(p)) {
-			unsigned int psects = get_nr_sects(p);
-			unsigned int pblocks = psects;
-			unsigned int podd = 0;
-			struct fdisk_parttype *type =
-					fdisk_get_parttype_from_code(cxt, p->sys_ind);
-
-			if (cxt->sector_size < 1024) {
-				pblocks /= (1024 / cxt->sector_size);
-				podd = psects % (1024 / cxt->sector_size);
-			}
-			if (cxt->sector_size > 1024)
-				pblocks *= (cxt->sector_size / 1024);
-                        printf(
-			    "%s  %c %11lu %11lu %11lu%c  %2x  %s\n",
-			partname(cxt->dev_path, i+1, w+2),
-/* boot flag */		!p->boot_ind ? ' ' : p->boot_ind == ACTIVE_FLAG
-			? '*' : '?',
-/* start */		(unsigned long) cround(get_partition_start(pe)),
-/* end */		(unsigned long) cround(get_partition_start(pe) + psects
-				- (psects ? 1 : 0)),
-/* odd flag on end */	(unsigned long) pblocks, podd ? '+' : ' ',
-/* type id */		p->sys_ind,
-/* type name */		type ? type->name : _("Unknown"));
-			check_consistency(cxt, p, i);
-			check_alignment(cxt, get_partition_start(pe), i);
-		}
-	}
-
-	/* Is partition table in disk order? It need not be, but... */
-	/* partition table entries are not checked for correct order if this
-	   is a sgi, sun or aix labeled disk... */
-	if (fdisk_is_disklabel(cxt, DOS) && wrong_p_order(NULL)) {
-		printf(_("\nPartition table entries are not in disk order\n"));
-	}
-}
-
-static void
-x_list_table(struct fdisk_context *cxt, int extend) {
-	struct pte *pe;
-	struct partition *p;
-	int i;
-
-	printf(_("\nDisk %s: %d heads, %llu sectors, %llu cylinders\n\n"),
-		cxt->dev_path, cxt->geom.heads, cxt->geom.sectors, cxt->geom.cylinders);
-        printf(_("Nr AF  Hd Sec  Cyl  Hd Sec  Cyl     Start      Size ID\n"));
-	for (i = 0 ; i < partitions; i++) {
-		pe = &ptes[i];
-		p = (extend ? pe->ext_pointer : pe->part_table);
-		if (p != NULL) {
-                        printf("%2d %02x%4d%4d%5d%4d%4d%5d%11lu%11lu %02x\n",
-				i + 1, p->boot_ind, p->head,
-				sector(p->sector),
-				cylinder(p->sector, p->cyl), p->end_head,
-				sector(p->end_sector),
-				cylinder(p->end_sector, p->end_cyl),
-				(unsigned long) get_start_sect(p),
-				(unsigned long) get_nr_sects(p), p->sys_ind);
-			if (p->sys_ind) {
-				check_consistency(cxt, p, i);
-				check_alignment(cxt, get_partition_start(pe), i);
-			}
-		}
-	}
-}
-
-void fill_bounds(sector_t *first, sector_t *last)
-{
-	int i;
-	struct pte *pe = &ptes[0];
-	struct partition *p;
-
-	for (i = 0; i < partitions; pe++,i++) {
-		p = pe->part_table;
-		if (!p->sys_ind || IS_EXTENDED (p->sys_ind)) {
-			first[i] = 0xffffffff;
-			last[i] = 0;
-		} else {
-			first[i] = get_partition_start(pe);
-			last[i] = first[i] + get_nr_sects(p) - 1;
-		}
-	}
-}
-
-void check(struct fdisk_context *cxt, int n, 
-	   unsigned int h, unsigned int s, unsigned int c,
-	   unsigned int start)
-{
-	unsigned int total, real_s, real_c;
-
-	real_s = sector(s) - 1;
-	real_c = cylinder(s, c);
-	total = (real_c * cxt->geom.sectors + real_s) * cxt->geom.heads + h;
-	if (!total)
-		fprintf(stderr, _("Warning: partition %d contains sector 0\n"), n);
-	if (h >= cxt->geom.heads)
-		fprintf(stderr,
-			_("Partition %d: head %d greater than maximum %d\n"),
-			n, h + 1, cxt->geom.heads);
-	if (real_s >= cxt->geom.sectors)
-		fprintf(stderr, _("Partition %d: sector %d greater than "
-			"maximum %llu\n"), n, s, cxt->geom.sectors);
-	if (real_c >= cxt->geom.cylinders)
-		fprintf(stderr, _("Partitions %d: cylinder %d greater than "
-			"maximum %llu\n"), n, real_c + 1, cxt->geom.cylinders);
-	if (cxt->geom.cylinders <= 1024 && start != total)
-		fprintf(stderr,
-			_("Partition %d: previous sectors %d disagrees with "
-			"total %d\n"), n, start, total);
+	if (fdisk_is_disklabel(cxt, DOS))
+		dos_list_table(cxt, xtra);
 }
 
 static void verify(struct fdisk_context *cxt)
@@ -1219,17 +697,13 @@ void print_partition_size(struct fdisk_context *cxt,
 
 static void new_partition(struct fdisk_context *cxt)
 {
-	int partnum = 0;
+	assert(cxt);
+	assert(cxt->label);
 
 	if (warn_geometry(cxt))
 		return;
 
-	if (fdisk_is_disklabel(cxt, SUN) ||
-	    fdisk_is_disklabel(cxt, SGI) ||
-	    fdisk_is_disklabel(cxt, GPT))
-		partnum = get_partition(cxt, 0, partitions);
-
-	fdisk_add_partition(cxt, partnum, NULL);
+	fdisk_add_partition(cxt, NULL);
 }
 
 static void write_table(struct fdisk_context *cxt)
@@ -1301,64 +775,19 @@ print_buffer(struct fdisk_context *cxt, unsigned char pbuffer[]) {
 
 static void print_raw(struct fdisk_context *cxt)
 {
-	int i;
+	size_t i;
+
+	assert(cxt);
+	assert(cxt->label);
 
 	printf(_("Device: %s\n"), cxt->dev_path);
 	if (fdisk_is_disklabel(cxt, SUN) ||
 	    fdisk_is_disklabel(cxt, SGI) ||
 	    fdisk_is_disklabel(cxt, GPT))
 		print_buffer(cxt, cxt->firstsector);
-	else for (i = 3; i < partitions; i++)
+
+	else for (i = 3; i < cxt->label->nparts_max; i++)
 		     print_buffer(cxt, ptes[i].sectorbuffer);
-}
-
-static void
-move_begin(struct fdisk_context *cxt, int i) {
-	struct pte *pe = &ptes[i];
-	struct partition *p = pe->part_table;
-	unsigned int new, free_start, curr_start, last;
-	int x;
-
-	if (warn_geometry(cxt))
-		return;
-	if (!p->sys_ind || !get_nr_sects(p) || IS_EXTENDED (p->sys_ind)) {
-		printf(_("Partition %d has no data area\n"), i + 1);
-		return;
-	}
-
-	/* the default start is at the second sector of the disk or at the
-	 * second sector of the extended partition
-	 */
-	free_start = pe->offset ? pe->offset + 1 : 1;
-
-	curr_start = get_partition_start(pe);
-
-	/* look for a free space before the current start of the partition */
-	for (x = 0; x < partitions; x++) {
-		unsigned int end;
-		struct pte *prev_pe = &ptes[x];
-		struct partition *prev_p = prev_pe->part_table;
-
-		if (!prev_p)
-			continue;
-		end = get_partition_start(prev_pe) + get_nr_sects(prev_p);
-
-		if (!is_cleared_partition(prev_p) &&
-		    end > free_start && end <= curr_start)
-			free_start = end;
-	}
-
-	last = get_partition_start(pe) + get_nr_sects(p) - 1;
-
-	new = read_int(cxt, free_start, curr_start, last, free_start,
-		       _("New beginning of data")) - pe->offset;
-
-	if (new != get_nr_sects(p)) {
-		unsigned int sects = get_nr_sects(p) + get_start_sect(p) - new;
-		set_nr_sects(p, sects);
-		set_start_sect(p, new);
-		pe->changed = 1;
-	}
 }
 
 static void __attribute__ ((__noreturn__)) handle_quit(struct fdisk_context *cxt)
@@ -1372,25 +801,31 @@ static void
 expert_command_prompt(struct fdisk_context *cxt)
 {
 	char c;
+	size_t n;
+
+	assert(cxt);
 
 	while(1) {
+		assert(cxt->label);
+
 		putchar('\n');
-		c = tolower(read_char(_("Expert command (m for help): ")));
+		c = tolower(read_char(cxt, _("Expert command (m for help): ")));
 		switch (c) {
 		case 'a':
 			if (fdisk_is_disklabel(cxt, SUN))
-				sun_set_alt_cyl(cxt);
+				fdisk_sun_set_alt_cyl(cxt);
 			break;
 		case 'b':
-			if (fdisk_is_disklabel(cxt, DOS))
-				move_begin(cxt, get_partition(cxt, 0, partitions));
+			if (fdisk_is_disklabel(cxt, DOS) &&
+			    fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				dos_move_begin(cxt, n);
 			break;
 		case 'c':
 			user_cylinders = read_int(cxt, 1, cxt->geom.cylinders, 1048576, 0,
 					 _("Number of cylinders"));
-			fdisk_context_set_user_geometry(cxt, user_cylinders, user_heads, user_sectors);
+			fdisk_override_geometry(cxt, user_cylinders, user_heads, user_sectors);
 			if (fdisk_is_disklabel(cxt, SUN))
-				sun_set_ncyl(cxt, cxt->geom.cylinders);
+				fdisk_sun_set_ncyl(cxt, cxt->geom.cylinders);
 			break;
 		case 'd':
 			print_raw(cxt);
@@ -1399,14 +834,14 @@ expert_command_prompt(struct fdisk_context *cxt)
 			if (fdisk_is_disklabel(cxt, SGI))
 				sgi_set_xcyl();
 			else if (fdisk_is_disklabel(cxt, SUN))
-				sun_set_xcyl(cxt);
+				fdisk_sun_set_xcyl(cxt);
 			else
 				if (fdisk_is_disklabel(cxt, DOS))
-					x_list_table(cxt, 1);
+					dos_list_table_expert(cxt, 1);
 			break;
 		case 'f':
 			if (fdisk_is_disklabel(cxt, DOS))
-				fix_partition_table_order();
+				dos_fix_partition_table_order(cxt);
 			break;
 		case 'g':
 			fdisk_create_disklabel(cxt, "sgi");
@@ -1414,23 +849,23 @@ expert_command_prompt(struct fdisk_context *cxt)
 		case 'h':
 			user_heads = read_int(cxt, 1, cxt->geom.heads, 256, 0,
 					 _("Number of heads"));
-			fdisk_context_set_user_geometry(cxt, user_cylinders, user_heads, user_sectors);
+			fdisk_override_geometry(cxt, user_cylinders, user_heads, user_sectors);
 			break;
 		case 'i':
 			if (fdisk_is_disklabel(cxt, SUN))
-				sun_set_ilfact(cxt);
+				fdisk_sun_set_ilfact(cxt);
 			else if (fdisk_is_disklabel(cxt, DOS))
 				dos_set_mbr_id(cxt);
 			break;
 		case 'o':
 			if (fdisk_is_disklabel(cxt, SUN))
-				sun_set_rspeed(cxt);
+				fdisk_sun_set_rspeed(cxt);
 			break;
 		case 'p':
 			if (fdisk_is_disklabel(cxt, SUN))
 				list_table(cxt, 1);
 			else
-				x_list_table(cxt, 0);
+				dos_list_table_expert(cxt, 0);
 			break;
 		case 'q':
 			handle_quit(cxt);
@@ -1439,11 +874,11 @@ expert_command_prompt(struct fdisk_context *cxt)
 		case 's':
 			user_sectors = read_int(cxt, 1, cxt->geom.sectors, 63, 0,
 					   _("Number of sectors"));
-			if (dos_compatible_flag)
+			if (is_dos_compatible(cxt))
 				fprintf(stderr, _("Warning: setting "
 					"sector offset for DOS "
 					"compatibility\n"));
-			fdisk_context_set_user_geometry(cxt, user_cylinders, user_heads, user_sectors);
+			fdisk_override_geometry(cxt, user_cylinders, user_heads, user_sectors);
 			break;
 		case 'v':
 			verify(cxt);
@@ -1453,7 +888,7 @@ expert_command_prompt(struct fdisk_context *cxt)
 			break;
 		case 'y':
 			if (fdisk_is_disklabel(cxt, SUN))
-				sun_set_pcylcount(cxt);
+				fdisk_sun_set_pcylcount(cxt);
 			break;
 		default:
 			print_menu(cxt, EXPERT_MENU);
@@ -1474,35 +909,23 @@ static int is_ide_cdrom_or_tape(char *device)
 }
 
 /* Print disk geometry and partition table of a specified device (-l option) */
-static void print_partition_table_from_option(char *device, unsigned long sector_size)
+static void print_partition_table_from_option(struct fdisk_context *cxt,
+				char *device, unsigned long sector_size)
 {
-	struct fdisk_context *cxt;
-
-	cxt = fdisk_new_context_from_filename(device, 1);	/* read-only */
-	if (!cxt)
+	if (fdisk_context_assign_device(cxt, device, 1) != 0)	/* read-only */
 		err(EXIT_FAILURE, _("cannot open %s"), device);
 
 	if (sector_size) /* passed -b option, override autodiscovery */
-		fdisk_context_force_sector_size(cxt, sector_size);
+		fdisk_override_sector_size(cxt, sector_size);
 
 	if (user_cylinders || user_heads || user_sectors)
-		fdisk_context_set_user_geometry(cxt, user_cylinders,
+		fdisk_override_geometry(cxt, user_cylinders,
 					user_heads, user_sectors);
 
-	if (!fdisk_dev_has_disklabel(cxt)) {
-		/*
-		 * Try BSD -- TODO: move to list_table() too
-		 */
-		update_units(cxt);
-		list_disk_geometry(cxt);
-		if (!fdisk_is_disklabel(cxt, AIX) &&
-		    !fdisk_is_disklabel(cxt, MAC))
-			btrydev(cxt);
-	} else
+	if (fdisk_dev_has_disklabel(cxt))
 		list_table(cxt, 0);
-
-	fdisk_free_context(cxt);
-	cxt = NULL;
+	else
+		list_disk_geometry(cxt);
 }
 
 /*
@@ -1510,7 +933,8 @@ static void print_partition_table_from_option(char *device, unsigned long sector
  * try all things in /proc/partitions that look like a full disk
  */
 static void
-print_all_partition_table_from_option(unsigned long sector_size)
+print_all_partition_table_from_option(struct fdisk_context *cxt,
+				      unsigned long sector_size)
 {
 	FILE *procpt;
 	char line[128 + 1], ptname[128 + 1], devname[256];
@@ -1532,7 +956,7 @@ print_all_partition_table_from_option(unsigned long sector_size)
 			char *cn = canonicalize_path(devname);
 			if (cn) {
 				if (!is_ide_cdrom_or_tape(cn))
-					print_partition_table_from_option(cn, sector_size);
+					print_partition_table_from_option(cxt, cn, sector_size);
 				free(cn);
 			}
 		}
@@ -1557,6 +981,9 @@ static void print_welcome(void)
 static void command_prompt(struct fdisk_context *cxt)
 {
 	int c;
+	size_t n;
+
+	assert(cxt);
 
 	if (fdisk_is_disklabel(cxt, OSF)) {
 		putchar('\n');
@@ -1565,23 +992,30 @@ static void command_prompt(struct fdisk_context *cxt)
 			 "disklabel mode.\n"),
 		       cxt->dev_path);
 		bsd_command_prompt(cxt);
+
 		/* If we return we may want to make an empty DOS label? */
-		cxt->disklabel = FDISK_DISKLABEL_DOS;
+		fdisk_context_switch_label(cxt, "dos");
 	}
 
 	while (1) {
+
+		assert(cxt->label);
+
 		putchar('\n');
-		c = tolower(read_char(_("Command (m for help): ")));
+		c = tolower(read_char(cxt, _("Command (m for help): ")));
 		switch (c) {
 		case 'a':
-			if (fdisk_is_disklabel(cxt, DOS))
-				toggle_active(get_partition(cxt, 1, partitions));
-			else if (fdisk_is_disklabel(cxt, SUN))
-				toggle_sunflags(cxt, get_partition(cxt, 1, partitions),
-						SUN_FLAG_UNMNT);
-			else if (fdisk_is_disklabel(cxt, SGI))
-				sgi_set_bootpartition(cxt,
-					get_partition(cxt, 1, partitions));
+			if (fdisk_is_disklabel(cxt, DOS) &&
+			    fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				fdisk_partition_toggle_flag(cxt, n, DOS_FLAG_ACTIVE);
+
+			else if (fdisk_is_disklabel(cxt, SUN) &&
+				 fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				fdisk_partition_toggle_flag(cxt, n, SUN_FLAG_UNMNT);
+
+			else if (fdisk_is_disklabel(cxt, SGI) &&
+				 fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				fdisk_partition_toggle_flag(cxt, n, SGI_FLAG_BOOT);
 			else
 				unknown_command(c);
 			break;
@@ -1589,29 +1023,38 @@ static void command_prompt(struct fdisk_context *cxt)
 			if (fdisk_is_disklabel(cxt, SGI))
 				sgi_set_bootfile(cxt);
 			else if (fdisk_is_disklabel(cxt, DOS)) {
-				cxt->disklabel = FDISK_DISKLABEL_OSF;
-				bsd_command_prompt(cxt);
-				cxt->disklabel = FDISK_DISKLABEL_DOS;
+
+				struct fdisk_context *bsd;
+
+				bsd = fdisk_new_nested_context(cxt, "bsd");
+				if (bsd)
+					bsd_command_prompt(bsd);
+				fdisk_free_context(bsd);
 			} else
 				unknown_command(c);
 			break;
 		case 'c':
 			if (fdisk_is_disklabel(cxt, DOS))
 				toggle_dos_compatibility_flag(cxt);
-			else if (fdisk_is_disklabel(cxt, SUN))
-				toggle_sunflags(cxt, get_partition(cxt, 1, partitions),
-						SUN_FLAG_RONLY);
-			else if (fdisk_is_disklabel(cxt, SGI))
-				sgi_set_swappartition(cxt,
-					get_partition(cxt, 1, partitions));
+			else if (fdisk_is_disklabel(cxt, SUN) &&
+				 fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				fdisk_partition_toggle_flag(cxt, n, SUN_FLAG_RONLY);
+
+			else if (fdisk_is_disklabel(cxt, SGI) &&
+				 fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				fdisk_partition_toggle_flag(cxt, n, SGI_FLAG_SWAP);
 			else
 				unknown_command(c);
 			break;
 		case 'd':
-			delete_partition(cxt, get_existing_partition(cxt, 1, partitions));
+			if (fdisk_ask_partnum(cxt, &n, FALSE) == 0)
+				delete_partition(cxt, n);
 			break;
 		case 'g':
 			fdisk_create_disklabel(cxt, "gpt");
+			break;
+		case 'G':
+			fdisk_create_disklabel(cxt, "sgi");
 			break;
 		case 'i':
 			if (fdisk_is_disklabel(cxt, SGI))
@@ -1643,7 +1086,7 @@ static void command_prompt(struct fdisk_context *cxt)
 			change_partition_type(cxt);
 			break;
 		case 'u':
-			change_units(cxt);
+			toggle_units(cxt);
 			break;
 		case 'v':
 			verify(cxt);
@@ -1680,12 +1123,20 @@ int main(int argc, char **argv)
 {
 	int c, optl = 0, opts = 0;
 	unsigned long sector_size = 0;
-	struct fdisk_context *cxt = NULL;
+	struct fdisk_context *cxt;
+	struct fdisk_label *lb;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
 	atexit(close_stdout);
+
+	fdisk_init_debug(0);
+	cxt = fdisk_new_context();
+	if (!cxt)
+		err(EXIT_FAILURE, _("failed to allocate libfdisk context"));
+
+	fdisk_context_set_ask(cxt, ask_callback, NULL);
 
 	while ((c = getopt(argc, argv, "b:c::C:hH:lsS:u::vV")) != -1) {
 		switch (c) {
@@ -1703,12 +1154,20 @@ int main(int argc, char **argv)
 			user_cylinders =  strtou32_or_err(optarg, _("invalid cylinders argument"));
 			break;
 		case 'c':
-			dos_compatible_flag = 0;	/* default */
-
-			if (optarg && !strcmp(optarg, "=dos"))
-				dos_compatible_flag = ~0;
-			else if (optarg && strcmp(optarg, "=nondos"))
-				usage(stderr);
+			if (optarg) {
+				/* this setting is independent on the current
+				 * actively used label */
+				lb = fdisk_context_get_label(cxt, "dos");
+				if (!lb)
+					err(EXIT_FAILURE, _("not found DOS label driver"));
+				if (strcmp(optarg, "=dos") == 0)
+					fdisk_dos_enable_compatible(lb, TRUE);
+				else if (strcmp(optarg, "=nondos") == 0)
+					fdisk_dos_enable_compatible(lb, FALSE);
+				else
+					usage(stderr);
+			}
+			/* use default if no optarg specified */
 			break;
 		case 'H':
 			user_heads = strtou32_or_err(optarg, _("invalid heads argument"));
@@ -1727,10 +1186,9 @@ int main(int argc, char **argv)
 			opts = 1;
 			break;
 		case 'u':
-			display_in_cyl_units = 0;		/* default */
-			if (optarg && strcmp(optarg, "=cylinders") == 0)
-				display_in_cyl_units = !display_in_cyl_units;
-			else if (optarg && strcmp(optarg, "=sectors"))
+			if (optarg && *optarg == '=')
+				optarg++;
+			if (fdisk_context_set_unit(cxt, optarg) != 0)
 				usage(stderr);
 			break;
 		case 'V':
@@ -1744,7 +1202,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	fdisk_init_debug(0);
 
 	if (sector_size && argc-optind != 1)
 		printf(_("Warning: the -b (set sector size) option should"
@@ -1755,9 +1212,9 @@ int main(int argc, char **argv)
 		if (argc > optind) {
 			int k;
 			for (k = optind; k < argc; k++)
-				print_partition_table_from_option(argv[k], sector_size);
+				print_partition_table_from_option(cxt, argv[k], sector_size);
 		} else
-			print_all_partition_table_from_option(sector_size);
+			print_all_partition_table_from_option(cxt, sector_size);
 		exit(EXIT_SUCCESS);
 	}
 
@@ -1779,25 +1236,19 @@ int main(int argc, char **argv)
 	if (argc-optind != 1)
 		usage(stderr);
 
-	cxt = fdisk_new_context_from_filename(argv[optind], 0);
-	if (!cxt)
+	if (fdisk_context_assign_device(cxt, argv[optind], 0) != 0)
 		err(EXIT_FAILURE, _("cannot open %s"), argv[optind]);
 
 	if (sector_size)	/* passed -b option, override autodiscovery */
-		fdisk_context_force_sector_size(cxt, sector_size);
+		fdisk_override_sector_size(cxt, sector_size);
 
 	if (user_cylinders || user_heads || user_sectors)
-		fdisk_context_set_user_geometry(cxt, user_cylinders,
+		fdisk_override_geometry(cxt, user_cylinders,
 						user_heads, user_sectors);
 
 	print_welcome();
 
-	if (!fdisk_dev_sectsz_is_default(cxt))
-		printf(_("Note: sector size is %ld (not %d)\n"),
-		       cxt->sector_size, DEFAULT_SECTOR_SIZE);
-
 	if (!fdisk_dev_has_disklabel(cxt)) {
-		update_units(cxt);	/* to provide compatible 'p'rint output */
 		fprintf(stderr,
 			_("Device does not contain a recognized partition table\n"));
 		fdisk_create_disklabel(cxt, NULL);
@@ -1805,5 +1256,6 @@ int main(int argc, char **argv)
 
 	command_prompt(cxt);
 
+	fdisk_free_context(cxt);
 	return 0;
 }

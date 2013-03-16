@@ -2,12 +2,6 @@ The following is a list of commands or features that are deprecated.  All
 deprecated utils are in maintenance mode and we keep them in source tree for
 backward compatibility only.
 
-What:	chkdupexe
-Why:	unnecessary, in Perl, not used in distributions, possible to replace
-        by a simple shell script.
-
---------------------------
-
 What:   'udev' and 'list' blkid(8) output formats
 Why:    udevd links libblkid directly; the 'list' is unnecessary, use lsblk(8)
 
@@ -61,14 +55,6 @@ What:	elvtune
 Why:	useless for kernel >= 2.6.9
 
 ---------------------------
-
-What:	arch(1) command
-Why:	deprecated in favor of uname(1) or arch(1) from coreutils
-
-	The arch(1) has been added (during 2.13 development cycle) to coreutils
-	where it will be maintained as an alias for uname(1) command.
-
-----------------------------
 
 What:	last(1)
 Why:	nobody uses this implementation

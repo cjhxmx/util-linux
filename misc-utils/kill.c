@@ -50,13 +50,15 @@
 #include <signal.h>
 
 #include "c.h"
-#include "kill.h"
 #include "nls.h"
 #include "closestream.h"
+#include "procutils.h"
 #include "strutils.h"
+#include "ttyutils.h"
+#include "xalloc.h"
 
 struct signv {
-	char *name;
+	const char *name;
 	int val;
 } sys_signame[] = {
 	/* POSIX signals */
@@ -64,25 +66,10 @@ struct signv {
 	{ "INT",	SIGINT }, 	/* 2 */
 	{ "QUIT",	SIGQUIT }, 	/* 3 */
 	{ "ILL",	SIGILL }, 	/* 4 */
-	{ "ABRT",	SIGABRT }, 	/* 6 */
-	{ "FPE",	SIGFPE }, 	/* 8 */
-	{ "KILL",	SIGKILL }, 	/* 9 */
-	{ "SEGV",	SIGSEGV }, 	/* 11 */
-	{ "PIPE",	SIGPIPE }, 	/* 13 */
-	{ "ALRM",	SIGALRM }, 	/* 14 */
-	{ "TERM",	SIGTERM }, 	/* 15 */
-	{ "USR1",	SIGUSR1 }, 	/* 10 (arm,i386,m68k,ppc), 30 (alpha,sparc*), 16 (mips) */
-	{ "USR2",	SIGUSR2 }, 	/* 12 (arm,i386,m68k,ppc), 31 (alpha,sparc*), 17 (mips) */
-	{ "CHLD",	SIGCHLD }, 	/* 17 (arm,i386,m68k,ppc), 20 (alpha,sparc*), 18 (mips) */
-	{ "CONT",	SIGCONT }, 	/* 18 (arm,i386,m68k,ppc), 19 (alpha,sparc*), 25 (mips) */
-	{ "STOP",	SIGSTOP },	/* 19 (arm,i386,m68k,ppc), 17 (alpha,sparc*), 23 (mips) */
-	{ "TSTP",	SIGTSTP },	/* 20 (arm,i386,m68k,ppc), 18 (alpha,sparc*), 24 (mips) */
-	{ "TTIN",	SIGTTIN },	/* 21 (arm,i386,m68k,ppc,alpha,sparc*), 26 (mips) */
-	{ "TTOU",	SIGTTOU },	/* 22 (arm,i386,m68k,ppc,alpha,sparc*), 27 (mips) */
-	/* Miscellaneous other signals */
 #ifdef SIGTRAP
 	{ "TRAP",	SIGTRAP },	/* 5 */
 #endif
+	{ "ABRT",	SIGABRT }, 	/* 6 */
 #ifdef SIGIOT
 	{ "IOT",	SIGIOT }, 	/* 6, same as SIGABRT */
 #endif
@@ -92,23 +79,28 @@ struct signv {
 #ifdef SIGBUS
 	{ "BUS",	SIGBUS },	/* 7 (arm,i386,m68k,ppc), 10 (mips,alpha,sparc*) */
 #endif
-#ifdef SIGSYS
-	{ "SYS",	SIGSYS }, 	/* 12 (mips,alpha,sparc*) */
-#endif
+	{ "FPE",	SIGFPE }, 	/* 8 */
+	{ "KILL",	SIGKILL }, 	/* 9 */
+	{ "USR1",	SIGUSR1 }, 	/* 10 (arm,i386,m68k,ppc), 30 (alpha,sparc*), 16 (mips) */
+	{ "SEGV",	SIGSEGV }, 	/* 11 */
+	{ "USR2",	SIGUSR2 }, 	/* 12 (arm,i386,m68k,ppc), 31 (alpha,sparc*), 17 (mips) */
+	{ "PIPE",	SIGPIPE }, 	/* 13 */
+	{ "ALRM",	SIGALRM }, 	/* 14 */
+	{ "TERM",	SIGTERM }, 	/* 15 */
 #ifdef SIGSTKFLT
 	{ "STKFLT",	SIGSTKFLT },	/* 16 (arm,i386,m68k,ppc) */
 #endif
-#ifdef SIGURG
-	{ "URG",	SIGURG },	/* 23 (arm,i386,m68k,ppc), 16 (alpha,sparc*), 21 (mips) */
-#endif
-#ifdef SIGIO
-	{ "IO",		SIGIO },	/* 29 (arm,i386,m68k,ppc), 23 (alpha,sparc*), 22 (mips) */
-#endif
-#ifdef SIGPOLL
-	{ "POLL",	SIGPOLL },	/* same as SIGIO */
-#endif
+	{ "CHLD",	SIGCHLD }, 	/* 17 (arm,i386,m68k,ppc), 20 (alpha,sparc*), 18 (mips) */
 #ifdef SIGCLD
 	{ "CLD",	SIGCLD },	/* same as SIGCHLD (mips) */
+#endif
+	{ "CONT",	SIGCONT }, 	/* 18 (arm,i386,m68k,ppc), 19 (alpha,sparc*), 25 (mips) */
+	{ "STOP",	SIGSTOP },	/* 19 (arm,i386,m68k,ppc), 17 (alpha,sparc*), 23 (mips) */
+	{ "TSTP",	SIGTSTP },	/* 20 (arm,i386,m68k,ppc), 18 (alpha,sparc*), 24 (mips) */
+	{ "TTIN",	SIGTTIN },	/* 21 (arm,i386,m68k,ppc,alpha,sparc*), 26 (mips) */
+	{ "TTOU",	SIGTTOU },	/* 22 (arm,i386,m68k,ppc,alpha,sparc*), 27 (mips) */
+#ifdef SIGURG
+	{ "URG",	SIGURG },	/* 23 (arm,i386,m68k,ppc), 16 (alpha,sparc*), 21 (mips) */
 #endif
 #ifdef SIGXCPU
 	{ "XCPU",	SIGXCPU },	/* 24 (arm,i386,m68k,ppc,alpha,sparc*), 30 (mips) */
@@ -122,8 +114,14 @@ struct signv {
 #ifdef SIGPROF
 	{ "PROF",	SIGPROF },	/* 27 (arm,i386,m68k,ppc,alpha,sparc*), 29 (mips) */
 #endif
-#ifdef SIGPWR
-	{ "PWR",	SIGPWR },	/* 30 (arm,i386,m68k,ppc), 29 (alpha,sparc*), 19 (mips) */
+#ifdef SIGWINCH
+	{ "WINCH",	SIGWINCH },	/* 28 (arm,i386,m68k,ppc,alpha,sparc*), 20 (mips) */
+#endif
+#ifdef SIGIO
+	{ "IO",		SIGIO },	/* 29 (arm,i386,m68k,ppc), 23 (alpha,sparc*), 22 (mips) */
+#endif
+#ifdef SIGPOLL
+	{ "POLL",	SIGPOLL },	/* same as SIGIO */
 #endif
 #ifdef SIGINFO
 	{ "INFO",	SIGINFO },	/* 29 (alpha) */
@@ -131,24 +129,23 @@ struct signv {
 #ifdef SIGLOST
 	{ "LOST",	SIGLOST }, 	/* 29 (arm,i386,m68k,ppc,sparc*) */
 #endif
-#ifdef SIGWINCH
-	{ "WINCH",	SIGWINCH },	/* 28 (arm,i386,m68k,ppc,alpha,sparc*), 20 (mips) */
+#ifdef SIGPWR
+	{ "PWR",	SIGPWR },	/* 30 (arm,i386,m68k,ppc), 29 (alpha,sparc*), 19 (mips) */
 #endif
 #ifdef SIGUNUSED
 	{ "UNUSED",	SIGUNUSED },	/* 31 (arm,i386,m68k,ppc) */
 #endif
+#ifdef SIGSYS
+	{ "SYS",	SIGSYS }, 	/* 31 (mips,alpha,sparc*) */
+#endif
 };
-
-extern char *mybasename(char *);
 
 static int arg_to_signum (char *arg, int mask);
 static void nosig (char *name);
 static void printsig (int sig);
-static void printsignals (FILE *fp);
+static void printsignals (FILE *fp, int pretty);
 static int usage (int status);
 static int kill_verbose (char *procname, int pid, int sig);
-
-static char *progname;
 
 #ifdef HAVE_SIGQUEUE
 static int use_sigval;
@@ -158,13 +155,8 @@ static union sigval sigdata;
 int main (int argc, char *argv[])
 {
     int errors, numsig, pid;
-    char *ep, *arg, *p;
+    char *ep, *arg;
     int do_pid, do_kill, check_all;
-    int *pids, *ip;
-
-    progname = argv[0];
-    if ((p = strrchr(progname, '/')) != NULL)
-	    progname = p+1;
 
     setlocale(LC_ALL, "");
     bindtextdomain(PACKAGE, LOCALEDIR);
@@ -172,7 +164,7 @@ int main (int argc, char *argv[])
     atexit(close_stdout);
 
     numsig = SIGTERM;
-    do_pid = (! strcmp (progname, "pid")); 	/* Yecch */
+    do_pid = (! strcmp (program_invocation_short_name, "pid")); 	/* Yecch */
     do_kill = 0;
     check_all = 0;
 
@@ -191,53 +183,65 @@ int main (int argc, char *argv[])
 	if (! strcmp (arg, "-v") || ! strcmp (arg, "-V") ||
 	    ! strcmp (arg, "--version")) {
 	    printf(UTIL_LINUX_VERSION);
-	    return 0;
+	    return EXIT_SUCCESS;
 	}
-	if (! strcmp (arg, "-a")) {
+	if (! strcmp (arg, "-h") || ! strcmp (arg, "--help"))
+	    return usage(EXIT_FAILURE);
+
+	if (! strcmp (arg, "-a") || ! strcmp (arg, "--all")) {
 	    check_all++;
 	    continue;
 	}
-	if (! strcmp (arg, "-l")) {
+	if (! strcmp (arg, "-l") || ! strcmp (arg, "--list")) {
 	    if (argc < 2) {
-		printsignals (stdout);
-		return 0;
+		printsignals (stdout, 0);
+		return EXIT_SUCCESS;
 	    }
-	    if (argc > 2) {
-		return usage (1);
-	    }
+	    if (argc > 2)
+		return usage (EXIT_FAILURE);
 	    /* argc == 2, accept "kill -l $?" */
 	    arg = argv[1];
-	    if ((numsig = arg_to_signum (arg, 1)) < 0) {
-		fprintf (stderr, _("%s: unknown signal %s\n"), progname, arg);
-		return 1;
-	    }
+	    if ((numsig = arg_to_signum (arg, 1)) < 0)
+		errx(EXIT_FAILURE, _("unknown signal: %s"), arg);
 	    printsig (numsig);
-	    return 0;
+	    return EXIT_SUCCESS;
 	}
-	if (! strcmp (arg, "-p")) {
+	/* for compatibility with procps kill(1) */
+	if (! strncmp (arg, "--list=", 7) || ! strncmp (arg, "-l=", 3)) {
+		char *p = strchr(arg, '=') + 1;
+		if ((numsig = arg_to_signum(p, 1)) < 0)
+			errx(EXIT_FAILURE, _("unknown signal: %s"), p);
+		printsig (numsig);
+		return EXIT_SUCCESS;
+	}
+	if (! strcmp (arg, "-L") || ! strcmp (arg, "--table")) {
+	    printsignals (stdout, 1);
+	    return EXIT_SUCCESS;
+	}
+	if (! strcmp (arg, "-p") || ! strcmp (arg, "--pid")) {
 	    do_pid++;
 	    if (do_kill)
-		return usage (1);
+		return usage (EXIT_FAILURE);
 	    continue;
 	}
-	if (! strcmp (arg, "-s")) {
+	if (! strcmp (arg, "-s") || ! strcmp (arg, "--signal")) {
 	    if (argc < 2) {
-		return usage (1);
+		return usage (EXIT_FAILURE);
 	    }
 	    do_kill++;
 	    if (do_pid)
-		return usage (1);
+		return usage (EXIT_FAILURE);
 	    argc--, argv++;
 	    arg = *argv;
 	    if ((numsig = arg_to_signum (arg, 0)) < 0) {
 		nosig (arg);
-		return 1;
+		return EXIT_FAILURE;
 	    }
 	    continue;
 	}
-	if (! strcmp (arg, "-q")) {
+	if (! strcmp (arg, "-q") || ! strcmp (arg, "--queue")) {
 	    if (argc < 2)
-		return usage (1);
+		return usage (EXIT_FAILURE);
 	    argc--, argv++;
 	    arg = *argv;
 #ifdef HAVE_SIGQUEUE
@@ -256,16 +260,16 @@ int main (int argc, char *argv[])
 	  break;
 	arg++;
 	if ((numsig = arg_to_signum (arg, 0)) < 0) {
-	    return usage (1);
+	    return usage (EXIT_FAILURE);
 	}
 	do_kill++;
 	if (do_pid)
-	    return usage (1);
+	    return usage (EXIT_FAILURE);
 	continue;
     }
 
     if (! *argv) {
-	return usage (1);
+	return usage (EXIT_FAILURE);
     }
     if (do_pid) {
 	numsig = -1;
@@ -278,20 +282,33 @@ int main (int argc, char *argv[])
 	pid = strtol (arg, &ep, 10);
 	if (! *ep)
 	    errors += kill_verbose (arg, pid, numsig);
-	else {
-	    pids = get_pids (arg, check_all);
-	    if (! pids) {
-		errors++;
-		fprintf (stderr, _("%s: can't find process \"%s\"\n"),
-			 progname, arg);
-		continue;
+	else  {
+	    struct proc_processes *ps = proc_open_processes();
+	    int ct = 0;
+
+	    if (!ps)
+	        continue;
+
+	    if (!check_all)
+		proc_processes_filter_by_uid(ps, getuid());
+
+	    proc_processes_filter_by_name(ps, arg);
+
+	    while (proc_next_pid(ps, &pid) == 0) {
+		errors += kill_verbose(arg, pid, numsig);
+		ct++;
 	    }
-	    for (ip = pids; *ip >= 0; ip++)
-		errors += kill_verbose (arg, *ip, numsig);
-	    free (pids);
+
+	    if (!ct) {
+		errors++;
+		warnx (_("cannot find process \"%s\""), arg);
+	    }
+	    proc_close_processes(ps);
 	}
     }
-    return (errors);
+    if (errors != 0)
+	errors = EXIT_FAILURE;
+    return errors;
 }
 
 #ifdef SIGRTMIN
@@ -362,8 +379,8 @@ static int arg_to_signum (char *arg, int maskbit)
 
 static void nosig (char *name)
 {
-    fprintf (stderr, _("%s: unknown signal %s; valid signals:\n"), progname, name);
-    printsignals (stderr);
+    warnx (_("unknown signal %s; valid signals:"), name);
+    printsignals (stderr, 1);
 }
 
 static void printsig (int sig)
@@ -385,42 +402,85 @@ static void printsig (int sig)
     printf("%d\n", sig);
 }
 
-static void printsignals (FILE *fp)
+#define FIELD_WIDTH 11
+static void pretty_print_signal(FILE *fp, size_t term_width, size_t *lpos,
+				int signum, const char *name)
 {
-    size_t n, lth, lpos = 0;
-
-    for (n = 0; n < ARRAY_SIZE(sys_signame); n++) {
-	lth = 1+strlen(sys_signame[n].name);
-	if (lpos+lth > 72) {
+	if (term_width < (*lpos + FIELD_WIDTH)) {
 	    fputc ('\n', fp);
-	    lpos = 0;
-	} else if (lpos)
-	    fputc (' ', fp);
-	lpos += lth;
-	fputs (sys_signame[n].name, fp);
-    }
+	    *lpos = 0;
+	}
+	*lpos += FIELD_WIDTH;
+	fprintf (fp, "%2d %-8s", signum, name);
+}
+
+static void printsignals (FILE *fp, int pretty)
+{
+    size_t n, lth, lpos = 0, width;
+
+    if (!pretty) {
+	for (n = 0; n < ARRAY_SIZE(sys_signame); n++) {
+	    lth = 1+strlen(sys_signame[n].name);
+	    if (lpos+lth > 72) {
+		fputc ('\n', fp);
+		lpos = 0;
+	    } else if (lpos)
+		fputc (' ', fp);
+	    lpos += lth;
+	    fputs (sys_signame[n].name, fp);
+	}
 #ifdef SIGRTMIN
-    fputs (" RT<N> RTMIN+<N> RTMAX-<N>", fp);
+	fputs (" RT<N> RTMIN+<N> RTMAX-<N>", fp);
+#endif
+	fputc ('\n', fp);
+	return;
+    }
+    /* pretty print */
+    width = get_terminal_width();
+    if (width == 0)
+	width = 72;
+    else
+	width -= 1;
+
+    for (n = 0; n < ARRAY_SIZE(sys_signame); n++)
+	    pretty_print_signal(fp, width, &lpos,
+			    sys_signame[n].val, sys_signame[n].name);
+
+#ifdef SIGRTMIN
+    pretty_print_signal(fp, width, &lpos, SIGRTMIN, "RTMIN");
+    pretty_print_signal(fp, width, &lpos, SIGRTMAX, "RTMAX");
 #endif
     fputc ('\n', fp);
 }
 
-static int usage (int status)
+static int usage(int status)
 {
-    FILE *fp;
+	FILE *out = (status == 0 ? stdout : stderr);
 
-    fp = (status == 0 ? stdout : stderr);
-    fprintf (fp, _("usage: %s [ -s signal | -p ] [ -a ] pid ...\n"), progname);
-    fprintf (fp, _("       %s -l [ signal ]\n"), progname);
-    return status;
+	fputs(USAGE_HEADER, out);
+	fprintf(out, _(" %s [options] <pid|name> [...]\n"), program_invocation_short_name);
+	fputs(USAGE_OPTIONS, out);
+	fputs(_(" -a, --all              do not restrict the name-to-pid conversion to processes\n"
+		"                        with the same uid as the present process\n"), out);
+	fputs(_(" -s, --signal <sig>     send specified signal\n"), out);
+	fputs(_(" -q, --queue <sig>      use sigqueue(2) rather than kill(2)\n"), out);
+	fputs(_(" -p, --pid              print pids without signaling them\n"), out);
+	fputs(_(" -l, --list [=<signal>] list signal names, or convert one to a name\n"), out);
+	fputs(_(" -L, --table            list signal names and numbers\n"), out);
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
+	fprintf(out, USAGE_MAN_TAIL("kill(1)"));
+
+	return status;
 }
 
-static int kill_verbose (char *procname, int pid, int sig)
+static int kill_verbose (char *procname, pid_t pid, int sig)
 {
-    int rc;
+    int rc = 0;
 
     if (sig < 0) {
-	printf ("%d\n", pid);
+	printf ("%ld\n", (long)pid);
 	return 0;
     }
 #ifdef HAVE_SIGQUEUE
@@ -431,8 +491,7 @@ static int kill_verbose (char *procname, int pid, int sig)
 	rc = kill (pid, sig);
 
     if (rc < 0) {
-	fprintf (stderr, "%s ", progname);
-	perror (procname);
+	warn(_("sending signal to %s failed"), procname);
 	return 1;
     }
     return 0;
