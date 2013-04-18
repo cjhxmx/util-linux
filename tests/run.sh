@@ -110,7 +110,7 @@ fi
 
 unset LIBMOUNT_DEBUG
 unset LIBBLKID_DEBUG
-unset BLKID_DEBUG
+unset LIBFDISK_DEBUG
 
 echo
 echo "-------------------- util-linux regression tests --------------------"

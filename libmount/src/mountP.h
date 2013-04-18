@@ -26,7 +26,9 @@
 #define CONFIG_LIBMOUNT_DEBUG
 
 #ifdef CONFIG_LIBMOUNT_ASSERT
-#include <assert.h>
+# include <assert.h>
+#else
+# define assert(x)
 #endif
 
 /*
@@ -131,6 +133,8 @@ extern int endswith(const char *s, const char *sx)
 			__attribute__((nonnull));
 extern int startswith(const char *s, const char *sx)
 			__attribute__((nonnull));
+
+extern char *stripoff_last_component(char *path);
 
 extern int is_file_empty(const char *name);
 

@@ -448,6 +448,11 @@ accessed under newdir.  The physical location of the files is not changed.
 Note that the
 .I olddir
 has to be a mountpoint.
+
+Note that moving a mount residing under a shared mount is invalid and
+unsupported. Use
+.B findmnt -o TARGET,PROPAGATION /dir
+to see the current propagation flags.
 .RE
 
 .B The shared subtrees operations.
@@ -495,13 +500,20 @@ Note that Linux kernel does not allow to change more propagation flags by one
 syscall and the flags cannot be mixed with another mount options.
 
 Since util-linux 2.23 mount command allows to use more propagation flags
-together and with another mount operations. This feature is EXPERIMENTAL. In
-this case the propagation flags are applied by additional mount(2) syscalls
+together and with another mount operations. This feature is EXPERIMENTAL.
+The propagation flags are applied by additional mount(2) syscalls
 after previous successful mount operation. Note that this use case is not
-atomic. The propagation flags is possible to specified in
+atomic. The propagation flags is possible to specify in
 .BR fstab (5)
 as mount options
-(private,slave,shared,unbindable,rprivate,rslave,rshared,runbindable).
+.RI ( private ,
+.IR slave ,
+.IR shared ,
+.IR unbindable ,
+.IR rprivate ,
+.IR rslave ,
+.IR rshared ,
+.IR runbindable ).
 
 For example
 .RS
@@ -569,7 +581,7 @@ existing record in /etc/mtab and fails when the record already
 exists (with regular non-fake mount, this check is done by kernel).
 .IP "\fB\-i, \-\-internal\-only\fP"
 Don't call the /sbin/mount.<filesystem> helper even if it exists.
-.IP "\fB\-l\fP"
+.IP "\fB\-l, \-\-show\-labels\fP"
 Add the labels in the mount output. Mount must have
 permission to read the disk device (e.g. be suid root) for this to work.
 One can set such a label for ext2, ext3 or ext4 using the
@@ -610,7 +622,7 @@ journal if the filesystem is dirty. To prevent this kind of write access, you
 may want to mount ext3 or ext4 filesystem with "ro,noload" mount options or
 set the block device to read-only mode, see command
 .BR blockdev (8).
-.IP "\fB\-w, \-\-rw\fP"
+.IP "\fB\-w, \-\-rw, \-\-read\-write\fP"
 Mount the filesystem read/write. This is the default. A synonym is
 .BR "\-o rw" .
 .IP "\fB\-L, \-\-label \fIlabel\fP"
@@ -2964,6 +2976,22 @@ and
 .BR ioctl
 families of functions) may lead to inconsistent result due to the lack of
 consistency check in kernel even if noac is used.
+.PP
+The
+.B loop
+option with the
+.B offset
+or
+.B sizelimit
+options used may fail when using older kernels if the
+.B mount
+command can't confirm that the size of the block device has been configured
+as requested. This situation can be worked around by using
+the
+.B losetup
+command manually before calling
+.B mount
+with the configured loop device.
 .SH HISTORY
 A
 .B mount

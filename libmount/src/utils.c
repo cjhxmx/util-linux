@@ -94,7 +94,7 @@ static int fstype_cmp(const void *v1, const void *v2)
 
 /* returns basename and keeps dirname in the @path, if @path is "/" (root)
  * then returns empty string */
-static char *stripoff_last_component(char *path)
+char *stripoff_last_component(char *path)
 {
 	char *p = path ? strrchr(path, '/') : NULL;
 
@@ -269,6 +269,8 @@ int mnt_fstype_is_pseudofs(const char *type)
 		"tmpfs"
 	};
 
+	assert(type);
+
 	return !(bsearch(&type, pseudofs, ARRAY_SIZE(pseudofs),
 				sizeof(char*), fstype_cmp) == NULL);
 }
@@ -281,6 +283,8 @@ int mnt_fstype_is_pseudofs(const char *type)
  */
 int mnt_fstype_is_netfs(const char *type)
 {
+	assert(type);
+
 	if (strcmp(type, "cifs")   == 0 ||
 	    strcmp(type, "smbfs")  == 0 ||
 	    strncmp(type,"nfs", 3) == 0 ||
@@ -462,7 +466,7 @@ static int get_filesystems(const char *filename, char ***filesystems, const char
 	FILE *f;
 	char line[128];
 
-	f = fopen(filename, "r");
+	f = fopen(filename, "r" UL_CLOEXECSTR);
 	if (!f)
 		return 1;
 
@@ -837,7 +841,7 @@ int mnt_open_uniq_filename(const char *filename, char **name)
 	 */
 	oldmode = umask(S_IRGRP|S_IWGRP|S_IXGRP|
 			S_IROTH|S_IWOTH|S_IXOTH);
-	fd = mkstemp(n);
+	fd = mkostemp(n, O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC);
 	umask(oldmode);
 
 	if (fd >= 0 && name)
@@ -859,10 +863,13 @@ int mnt_open_uniq_filename(const char *filename, char **name)
  */
 char *mnt_get_mountpoint(const char *path)
 {
-	char *mnt = strdup(path);
+	char *mnt;
 	struct stat st;
 	dev_t dir, base;
 
+	assert(path);
+
+	mnt = strdup(path);
 	if (!mnt)
 		return NULL;
 	if (*mnt == '/' && *(mnt + 1) == '\0')
@@ -949,7 +956,7 @@ char *mnt_get_kernel_cmdline_option(const char *name)
 	if (!path)
 		path = _PATH_PROC_CMDLINE;
 #endif
-	f = fopen(path, "r");
+	f = fopen(path, "r" UL_CLOEXECSTR);
 	if (!f)
 		return NULL;
 

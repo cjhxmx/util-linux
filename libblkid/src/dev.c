@@ -48,10 +48,10 @@ void blkid_free_dev(blkid_dev dev)
 	if (!dev)
 		return;
 
-	DBG(DEBUG_DEV,
-	    printf("  freeing dev %s (%s)\n", dev->bid_name, dev->bid_type ?
+	DBG(DEV,
+	    blkid_debug("  freeing dev %s (%s)", dev->bid_name, dev->bid_type ?
 		   dev->bid_type : "(null)"));
-	DBG(DEBUG_DEV, blkid_debug_dump_dev(dev));
+	DBG(DEV, blkid_debug_dump_dev(dev));
 
 	list_del(&dev->bid_devs);
 	while (!list_empty(&dev->bid_tags)) {
@@ -67,7 +67,7 @@ void blkid_free_dev(blkid_dev dev)
 /*
  * Given a blkid device, return its name
  */
-extern const char *blkid_dev_devname(blkid_dev dev)
+const char *blkid_dev_devname(blkid_dev dev)
 {
 	return dev ? dev->bid_name : NULL;
 }
@@ -82,21 +82,20 @@ void blkid_debug_dump_dev(blkid_dev dev)
 		return;
 	}
 
-	printf("  dev: name = %s\n", dev->bid_name);
-	printf("  dev: DEVNO=\"0x%0llx\"\n", (long long)dev->bid_devno);
-	printf("  dev: TIME=\"%ld.%ld\"\n", (long)dev->bid_time, (long)dev->bid_utime);
-	printf("  dev: PRI=\"%d\"\n", dev->bid_pri);
-	printf("  dev: flags = 0x%08X\n", dev->bid_flags);
+	fprintf(stderr, "  dev: name = %s\n", dev->bid_name);
+	fprintf(stderr, "  dev: DEVNO=\"0x%0llx\"\n", (long long)dev->bid_devno);
+	fprintf(stderr, "  dev: TIME=\"%ld.%ld\"\n", (long)dev->bid_time, (long)dev->bid_utime);
+	fprintf(stderr, "  dev: PRI=\"%d\"\n", dev->bid_pri);
+	fprintf(stderr, "  dev: flags = 0x%08X\n", dev->bid_flags);
 
 	list_for_each(p, &dev->bid_tags) {
 		blkid_tag tag = list_entry(p, struct blkid_struct_tag, bit_tags);
 		if (tag)
-			printf("    tag: %s=\"%s\"\n", tag->bit_name,
+			fprintf(stderr, "    tag: %s=\"%s\"\n", tag->bit_name,
 			       tag->bit_val);
 		else
-			printf("    tag: NULL\n");
+			fprintf(stderr, "    tag: NULL\n");
 	}
-	printf("\n");
 }
 #endif
 
@@ -125,7 +124,7 @@ struct blkid_struct_dev_iterate {
 	struct list_head	*p;
 };
 
-extern blkid_dev_iterate blkid_dev_iterate_begin(blkid_cache cache)
+blkid_dev_iterate blkid_dev_iterate_begin(blkid_cache cache)
 {
 	blkid_dev_iterate iter;
 
@@ -145,7 +144,7 @@ extern blkid_dev_iterate blkid_dev_iterate_begin(blkid_cache cache)
 	return iter;
 }
 
-extern int blkid_dev_set_search(blkid_dev_iterate iter,
+int blkid_dev_set_search(blkid_dev_iterate iter,
 				 char *search_type, char *search_value)
 {
 	char *new_type, *new_value;
@@ -172,7 +171,7 @@ extern int blkid_dev_set_search(blkid_dev_iterate iter,
 /*
  * Return 0 on success, -1 on error
  */
-extern int blkid_dev_next(blkid_dev_iterate iter,
+int blkid_dev_next(blkid_dev_iterate iter,
 			  blkid_dev *ret_dev)
 {
 	blkid_dev		dev;
@@ -193,7 +192,7 @@ extern int blkid_dev_next(blkid_dev_iterate iter,
 	return -1;
 }
 
-extern void blkid_dev_iterate_end(blkid_dev_iterate iter)
+void blkid_dev_iterate_end(blkid_dev_iterate iter)
 {
 	if (!iter || iter->magic != DEV_ITERATE_MAGIC)
 		return;

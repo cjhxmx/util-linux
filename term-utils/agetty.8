@@ -100,7 +100,7 @@ details.
 .TP
 \-E, \-\-remote
 If \-H \fIfakehost\fP option is given then \-r \fIfakehost\fP options is
-added to the the \fB/bin/login\fP command line.
+added to the \fB/bin/login\fP command line.
 .TP
 \-f, \-\-issue\-file \fIissue_file\fP
 Display the contents of \fIissue_file\fP instead of \fI/etc/issue\fP.
@@ -175,6 +175,9 @@ Please read the SECURITY NOTICE below if you want to use this.
 \-p, \-\-login\-pause
 Wait for any key before dropping to the login prompt.  Can be combined
 with \fB\-\-autologin\fP to save memory by lazily spawning shells.
+.TP
+\-r, \-\-chroot \fI"directory"\fP
+Change root to the specified directory.
 .TP
 \-R, \-\-hangup
 Do call vhangup() for a virtually hangup of the specified terminal.

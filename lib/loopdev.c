@@ -41,6 +41,7 @@
 #include "loopdev.h"
 #include "canonicalize.h"
 #include "at.h"
+#include "blkdev.h"
 
 #define CONFIG_LOOPDEV_DEBUG
 
@@ -289,7 +290,7 @@ int loopcxt_get_fd(struct loopdev_cxt *lc)
 
 	if (lc->fd < 0) {
 		lc->mode = lc->flags & LOOPDEV_FL_RDWR ? O_RDWR : O_RDONLY;
-		lc->fd = open(lc->device, lc->mode);
+		lc->fd = open(lc->device, lc->mode | O_CLOEXEC);
 		DBG(lc, loopdev_debug("open %s [%s]: %s", lc->device,
 				lc->flags & LOOPDEV_FL_RDWR ? "rw" : "ro",
 				lc->fd < 0 ? "failed" : "ok"));
@@ -492,7 +493,7 @@ static int loopcxt_next_from_proc(struct loopdev_cxt *lc)
 	DBG(lc, loopdev_debug("iter: scan /proc/partitions"));
 
 	if (!iter->proc)
-		iter->proc = fopen(_PATH_PROC_PARTITIONS, "r");
+		iter->proc = fopen(_PATH_PROC_PARTITIONS, "r" UL_CLOEXECSTR);
 	if (!iter->proc)
 		return 1;
 
@@ -867,7 +868,7 @@ int loopmod_supports_partscan(void)
 	if (get_linux_version() >= KERNEL_VERSION(3,2,0))
 		return 1;
 
-	f = fopen("/sys/module/loop/parameters/max_part", "r");
+	f = fopen("/sys/module/loop/parameters/max_part", "r" UL_CLOEXECSTR);
 	if (!f)
 		return 0;
 	rc = fscanf(f, "%d", &ret);
@@ -1072,6 +1073,64 @@ int loopcxt_set_backing_file(struct loopdev_cxt *lc, const char *filename)
 }
 
 /*
+ * In kernels prior to v3.9, if the offset or sizelimit options
+ * are used, the block device's size won't be synced automatically.
+ * blockdev --getsize64 and filesystems will use the backing
+ * file size until the block device has been re-opened or the
+ * LOOP_SET_CAPACITY ioctl is called to sync the sizes.
+ *
+ * Since mount -oloop uses the LO_FLAGS_AUTOCLEAR option and passes
+ * the open file descriptor to the mount system call, we need to use
+ * the ioctl. Calling losetup directly doesn't have this problem since
+ * it closes the device when it exits and whatever consumes the device
+ * next will re-open it, causing the resync.
+ */
+static int loopcxt_check_size(struct loopdev_cxt *lc, int file_fd)
+{
+	uint64_t size, expected_size;
+	int dev_fd;
+	struct stat st;
+
+	if (!lc->info.lo_offset && !lc->info.lo_sizelimit)
+		return 0;
+
+	if (fstat(file_fd, &st))
+		return -errno;
+
+	expected_size = st.st_size;
+
+	if (lc->info.lo_offset > 0)
+		expected_size -= lc->info.lo_offset;
+
+	if (lc->info.lo_sizelimit > 0 && lc->info.lo_sizelimit < expected_size)
+		expected_size = lc->info.lo_sizelimit;
+
+	dev_fd = loopcxt_get_fd(lc);
+	if (dev_fd < 0)
+		return -errno;
+
+	if (blkdev_get_size(dev_fd, (unsigned long long *) &size))
+		return -errno;
+
+	if (expected_size != size) {
+		if (loopcxt_set_capacity(lc)) {
+			/* ioctl not available */
+			if (errno == ENOTTY || errno == EINVAL)
+				errno = ERANGE;
+			return -errno;
+		}
+
+		if (blkdev_get_size(dev_fd, (unsigned long long *) &size))
+			return -errno;
+
+		if (expected_size != size)
+			return -ERANGE;
+	}
+
+	return 0;
+}
+
+/*
  * @cl: context
  *
  * Associate the current device (see loopcxt_{set,get}_device()) with
@@ -1104,7 +1163,7 @@ int loopcxt_setup_device(struct loopdev_cxt *lc)
 	if (lc->info.lo_flags & LO_FLAGS_READ_ONLY)
 		mode = O_RDONLY;
 
-	if ((file_fd = open(lc->filename, mode)) < 0) {
+	if ((file_fd = open(lc->filename, mode | O_CLOEXEC)) < 0) {
 		if (mode != O_RDONLY && (errno == EROFS || errno == EACCES))
 			file_fd = open(lc->filename, mode = O_RDONLY);
 
@@ -1150,15 +1209,18 @@ int loopcxt_setup_device(struct loopdev_cxt *lc)
 
 	DBG(lc, loopdev_debug("setup: LOOP_SET_FD: OK"));
 
-	close(file_fd);
-	file_fd = -1;
-
 	if (ioctl(dev_fd, LOOP_SET_STATUS64, &lc->info)) {
 		DBG(lc, loopdev_debug("LOOP_SET_STATUS64 failed: %m"));
 		goto err;
 	}
 
 	DBG(lc, loopdev_debug("setup: LOOP_SET_STATUS64: OK"));
+
+	if ((rc = loopcxt_check_size(lc, file_fd)))
+		goto err;
+
+	close(file_fd);
+	file_fd = -1;
 
 	memset(&lc->info, 0, sizeof(lc->info));
 	lc->has_info = 0;
@@ -1174,6 +1236,24 @@ err:
 
 	DBG(lc, loopdev_debug("setup failed [rc=%d]", rc));
 	return rc;
+}
+
+int loopcxt_set_capacity(struct loopdev_cxt *lc)
+{
+	int fd = loopcxt_get_fd(lc);
+
+	if (fd < 0)
+		return -EINVAL;
+
+	/* Kernels prior to v2.6.30 don't support this ioctl */
+	if (ioctl(fd, LOOP_SET_CAPACITY, 0) < 0) {
+		int rc = -errno;
+		DBG(lc, loopdev_debug("LOOP_SET_CAPACITY failed: %m"));
+		return rc;
+	}
+
+	DBG(lc, loopdev_debug("capacity set"));
+	return 0;
 }
 
 int loopcxt_delete_device(struct loopdev_cxt *lc)
@@ -1205,7 +1285,7 @@ int loopcxt_find_unused(struct loopdev_cxt *lc)
 	DBG(lc, loopdev_debug("find_unused requested"));
 
 	if (lc->flags & LOOPDEV_FL_CONTROL) {
-		int ctl = open(_PATH_DEV_LOOPCTL, O_RDWR);
+		int ctl = open(_PATH_DEV_LOOPCTL, O_RDWR|O_CLOEXEC);
 
 		if (ctl >= 0)
 			rc = ioctl(ctl, LOOP_CTL_GET_FREE);

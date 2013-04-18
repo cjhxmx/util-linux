@@ -2,8 +2,8 @@
    Copyright (C) 2009-2010 Free Software Foundation, Inc.
 
    This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
+   it under the terms of the GNU Lesser General Public License as published by
+   the Free Software Foundation, either version 2.1 of the License, or
    (at your option) any later version.
 
    This program is distributed in the hope that it will be useful,
@@ -173,7 +173,7 @@ mbsalign (const char *src, char *dest, size_t dest_size,
   const char *str_to_print = src;
   size_t n_cols = src_size - 1;
   size_t n_used_bytes = n_cols; /* Not including NUL */
-  size_t n_spaces = 0;
+  size_t n_spaces = 0, space_left;
   bool conversion = false;
   bool wc_enabled = false;
 
@@ -276,7 +276,7 @@ mbsalign_unibyte:
         }
 
       dest = mbs_align_pad (dest, dest_end, start_spaces);
-      size_t space_left = dest_end - dest;
+      space_left = dest_end - dest;
       dest = mempcpy (dest, str_to_print, min (n_used_bytes, space_left));
       mbs_align_pad (dest, dest_end, end_spaces);
     }

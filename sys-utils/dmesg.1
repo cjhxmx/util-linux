@@ -56,6 +56,9 @@ will print messages from system daemons only.  For all supported facilities
 see
 .B dmesg \-\-help
 output.
+.IP "\fB\-H\fR, \fB\-\-human\fR"
+Enable human readable output.  See also \fB\-\-color\fR, \fB\-\-reltime\fR
+and \fB\-\-nopager\fR.
 .IP "\fB\-h\fR, \fB\-\-help\fR"
 Print a help text and exit.
 .IP "\fB\-k\fR, \fB\-\-kernel\fR"
@@ -100,6 +103,8 @@ option is used,
 will
 .I not
 print or clear the kernel ring buffer.
+.IP "\fB\-P\fR, \fB\-\-nopager\fR"
+Do not pipe output into a pager, the pager is enabled for \fB\-\-human\fR output.
 .IP "\fB\-r\fR, \fB\-\-raw\fR"
 Print the raw message buffer, i.e., do not strip the log level prefixes.
 

@@ -139,6 +139,7 @@ struct lscpu_desc {
 	char	*vendor;
 	char	*family;
 	char	*model;
+	char	*modelname;
 	char	*virtflag;	/* virtualization flag (vmx, svm) */
 	char	*hypervisor;	/* hypervisor software */
 	int	hyper;		/* hypervisor vendor ID */
@@ -353,6 +354,7 @@ read_basicinfo(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 		else if (lookup(buf, "family", &desc->family)) ;
 		else if (lookup(buf, "cpu family", &desc->family)) ;
 		else if (lookup(buf, "model", &desc->model)) ;
+		else if (lookup(buf, "model name", &desc->modelname)) ;
 		else if (lookup(buf, "stepping", &desc->stepping)) ;
 		else if (lookup(buf, "cpu MHz", &desc->mhz)) ;
 		else if (lookup(buf, "flags", &desc->flags)) ;		/* x86 */
@@ -378,6 +380,13 @@ read_basicinfo(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 			desc->mode |= MODE_32BIT | MODE_64BIT;		/* s390x */
 		if (strstr(buf, " sun4v ") || strstr(buf, " sun4u "))
 			desc->mode |= MODE_32BIT | MODE_64BIT;		/* sparc64 */
+	}
+
+	if (desc->arch && mod->system != SYSTEM_SNAPSHOT) {
+		if (strcmp(desc->arch, "ppc64") == 0)
+			desc->mode |= MODE_32BIT | MODE_64BIT;
+		else if (strcmp(desc->arch, "ppc") == 0)
+			desc->mode |= MODE_32BIT;
 	}
 
 	fclose(fp);
@@ -512,7 +521,7 @@ read_hypervisor_cpuid(struct lscpu_desc *desc)
 
 #else	/* ! __x86_64__ */
 static void
-read_hypervisor_cpuid(struct lscpu_desc *desc)
+read_hypervisor_cpuid(struct lscpu_desc *desc __attribute__((__unused__)))
 {
 }
 #endif
@@ -551,6 +560,8 @@ read_hypervisor(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 		FILE *fd = path_fopen("r", 0, _PATH_PROC_SYSINFO);
 		char buf[BUFSIZ];
 
+		if (!fd)
+			return;
 		desc->hyper = HYPER_IBM;
 		desc->hypervisor = "PR/SM";
 		desc->virtype = VIRT_FULL;
@@ -1206,6 +1217,8 @@ print_summary(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 		print_s(_("CPU family:"), desc->family);
 	if (desc->model)
 		print_s(_("Model:"), desc->model);
+	if (desc->modelname)
+		print_s(_("Model name:"), desc->modelname);
 	if (desc->stepping)
 		print_s(_("Stepping:"), desc->stepping);
 	if (desc->mhz)
@@ -1324,9 +1337,7 @@ int main(int argc, char *argv[])
 		case 'h':
 			usage(stdout);
 		case 'p':
-			goto hop_over;
 		case 'e':
-			hop_over:
 			if (optarg) {
 				if (*optarg == '=')
 					optarg++;
@@ -1357,7 +1368,7 @@ int main(int argc, char *argv[])
 	if (cpu_modifier_specified && mod->mode == OUTPUT_SUMMARY) {
 		fprintf(stderr,
 			_("%s: options --all, --online and --offline may only "
-			  "be used with options --extended or --parsable.\n"),
+			  "be used with options --extended or --parse.\n"),
 			program_invocation_short_name);
 		return EXIT_FAILURE;
 	}

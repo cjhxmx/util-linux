@@ -23,6 +23,7 @@
 #include "closestream.h"
 #include "optutils.h"
 #include "xalloc.h"
+#include "canonicalize.h"
 
 enum {
 	A_CREATE = 1,		/* setup a new device */
@@ -167,27 +168,19 @@ static int show_all_loops(struct loopdev_cxt *lc, const char *file,
 		st = NULL;
 
 	while (loopcxt_next(lc) == 0) {
-
-		if (file && !loopcxt_is_used(lc, st, file, offset, flags))
-			continue;
+		if (file && !loopcxt_is_used(lc, st, file, offset, flags)) {
+			char *canonized;
+			int ret;
+			canonized = canonicalize_path(file);
+			ret = loopcxt_is_used(lc, st, canonized, offset, flags);
+			free(canonized);
+			if (!ret)
+				continue;
+		}
 		printf_loopdev(lc);
 	}
 	loopcxt_deinit_iterator(lc);
 	return 0;
-}
-
-static int set_capacity(struct loopdev_cxt *lc)
-{
-	int fd = loopcxt_get_fd(lc);
-
-	if (fd < 0)
-		warn(_("cannot open %s"), loopcxt_get_device(lc));
-	else if (ioctl(fd, LOOP_SET_CAPACITY) != 0)
-		warnx(_("%s: set capacity failed"), loopcxt_get_device(lc));
-	else
-		return 0;
-
-	return -1;
 }
 
 static int delete_loop(struct loopdev_cxt *lc)
@@ -678,7 +671,10 @@ int main(int argc, char **argv)
 			warn(_("%s"), loopcxt_get_device(&lc));
 		break;
 	case A_SET_CAPACITY:
-		res = set_capacity(&lc);
+		res = loopcxt_set_capacity(&lc);
+		if (res)
+			warn(_("%s: set capacity failed"),
+			        loopcxt_get_device(&lc));
 		break;
 	default:
 		usage(stderr);

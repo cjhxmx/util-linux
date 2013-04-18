@@ -152,14 +152,16 @@ canonicalize_dm_name(const char *ptname)
 	char	path[256], name[256], *res = NULL;
 
 	snprintf(path, sizeof(path), "/sys/block/%s/dm/name", ptname);
-	if (!(f = fopen(path, "r")))
+	if (!(f = fopen(path, "r" UL_CLOEXECSTR)))
 		return NULL;
 
 	/* read "<name>\n" from sysfs */
 	if (fgets(name, sizeof(name), f) && (sz = strlen(name)) > 1) {
 		name[sz - 1] = '\0';
 		snprintf(path, sizeof(path), "/dev/mapper/%s", name);
-		res = strdup(path);
+
+		if (access(path, F_OK) == 0)
+			res = strdup(path);
 	}
 	fclose(f);
 	return res;

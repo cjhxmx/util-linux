@@ -30,7 +30,6 @@
 #include <time.h>
 #include <sys/file.h>
 #include <sys/socket.h>
-#include <netdb.h>
 #include <langinfo.h>
 #include <grp.h>
 #include <arpa/inet.h>
@@ -1241,9 +1240,10 @@ static char *xgethostname(void)
 	if (!name)
 		log_err(_("failed to allocate memory: %m"));
 
-	if (gethostname(name, sz) != 0)
+	if (gethostname(name, sz) != 0) {
+		free(name);
 		return NULL;
-
+	}
 	name[sz - 1] = '\0';
 	return name;
 }
@@ -1258,9 +1258,10 @@ static char *xgetdomainname(void)
 	if (!name)
 		log_err(_("failed to allocate memory: %m"));
 
-	if (getdomainname(name, sz) != 0)
+	if (getdomainname(name, sz) != 0) {
+		free(name);
 		return NULL;
-
+	}
 	name[sz - 1] = '\0';
 	return name;
 #endif
@@ -1954,6 +1955,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	fputs(_(" -8, --8bits                assume 8-bit tty\n"), out);
 	fputs(_(" -a, --autologin <user>     login the specified user automatically\n"), out);
 	fputs(_(" -c, --noreset              do not reset control mode\n"), out);
+	fputs(_(" -E, --remote               use -r <hostname> for login(1)\n"), out);
 	fputs(_(" -f, --issue-file <file>    display issue file\n"), out);
 	fputs(_(" -h, --flow-control         enable hardware flow control\n"), out);
 	fputs(_(" -H, --host <hostname>      specify login host\n"), out);
@@ -1965,6 +1967,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	fputs(_(" -n, --skip-login           do not prompt for login\n"), out);
 	fputs(_(" -o, --login-options <opts> options that are passed to login\n"), out);
 	fputs(_(" -p, --loginpause           wait for any key before the login\n"), out);
+	fputs(_(" -r, --chroot <dir>         change root to the directory\n"), out);
 	fputs(_(" -R, --hangup               do virtually hangup on the tty\n"), out);
 	fputs(_(" -s, --keep-baud            try to keep baud rate after break\n"), out);
 	fputs(_(" -t, --timeout <number>     login process timeout\n"), out);
@@ -1977,9 +1980,8 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	fputs(_("     --long-hostname        show full qualified hostname\n"), out);
 	fputs(_("     --erase-chars <string> additional backspace chars\n"), out);
 	fputs(_("     --kill-chars <string>  additional kill chars\n"), out);
-	fputs(USAGE_SEPARATOR, out);
-	fputs(USAGE_HELP, out);
-	fputs(USAGE_VERSION, out);
+	fputs(_("     --help                 display this help and exit\n"), out);
+	fputs(_("     --version              output version information and exit\n"), out);
 	fprintf(out, USAGE_MAN_TAIL("agetty(8)"));
 
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
@@ -2098,7 +2100,6 @@ static void output_ip(sa_family_t family)
 	if (host && getaddrinfo(host, NULL, &hints, &info) == 0 && info) {
 
 		void *addr = NULL;
-		char buff[INET6_ADDRSTRLEN + 1];
 
 		switch (info->ai_family) {
 		case AF_INET:
@@ -2108,8 +2109,12 @@ static void output_ip(sa_family_t family)
 			addr = &((struct sockaddr_in6 *) info->ai_addr)->sin6_addr;
 			break;
 		}
-		inet_ntop(info->ai_family, (void *) addr, buff, sizeof(buff));
-		printf("%s", buff);
+		if (addr) {
+			char buff[INET6_ADDRSTRLEN + 1];
+
+			inet_ntop(info->ai_family, (void *) addr, buff, sizeof(buff));
+			printf("%s", buff);
+		}
 
 		freeaddrinfo(info);
 	}

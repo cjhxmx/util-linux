@@ -140,7 +140,7 @@ static int fs_proc_check(const char *fs_name)
 	FILE	*f;
 	char	buf[80], *cp, *t;
 
-	f = fopen("/proc/filesystems", "r");
+	f = fopen("/proc/filesystems", "r" UL_CLOEXECSTR);
 	if (!f)
 		return 0;
 	while (!feof(f)) {
@@ -184,7 +184,7 @@ static int check_for_modules(const char *fs_name)
 		return 0;
 	snprintf(buf, sizeof(buf), "/lib/modules/%s/modules.dep", uts.release);
 
-	f = fopen(buf, "r");
+	f = fopen(buf, "r" UL_CLOEXECSTR);
 	if (!f)
 		return 0;
 
@@ -295,7 +295,7 @@ static void ext_get_info(blkid_probe pr, int ver, struct ext2_super_block *es)
 {
 	struct blkid_chain *chn = blkid_probe_get_chain(pr);
 
-	DBG(DEBUG_PROBE, printf("ext2_sb.compat = %08X:%08X:%08X\n",
+	DBG(PROBE, blkid_debug("ext2_sb.compat = %08X:%08X:%08X",
 		   le32_to_cpu(es->s_feature_compat),
 		   le32_to_cpu(es->s_feature_incompat),
 		   le32_to_cpu(es->s_feature_ro_compat)));

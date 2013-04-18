@@ -215,9 +215,17 @@ static inline int dirfd(DIR *d)
  * Fallback defines for old versions of glibc
  */
 #include <fcntl.h>
+
+#ifdef O_CLOEXEC
+#define UL_CLOEXECSTR	"e"
+#else
+#define UL_CLOEXECSTR	""
+#endif
+
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
+
 
 #ifndef AI_ADDRCONFIG
 #define AI_ADDRCONFIG 0x0020
@@ -262,7 +270,7 @@ static inline int usleep(useconds_t usec)
 
 /*
  * Constant strings for usage() functions. For more info see
- * Documentation/howto-usage-function.txt and sys-utils/arch.c
+ * Documentation/howto-usage-function.txt and disk-utils/delpart.c
  */
 #define USAGE_HEADER     _("\nUsage:\n")
 #define USAGE_OPTIONS    _("\nOptions:\n")

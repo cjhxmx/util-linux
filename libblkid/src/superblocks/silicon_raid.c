@@ -73,8 +73,10 @@ static int checksum(struct silicon_metadata *sil)
 	unsigned short count = offsetof(struct silicon_metadata, checksum1) / 2;
 	uint16_t *p = (uint16_t *) sil;
 
-	while (count--)
-		sum += *p++;
+	while (count--) {
+		uint16_t x = *p++;
+		sum += le16_to_cpu(x);
+	}
 
 	return (-sum & 0xFFFF) == le16_to_cpu(sil->checksum1);
 }
@@ -103,7 +105,7 @@ static int probe_silraid(blkid_probe pr,
 	if (sil->disk_number >= 8)
 		return -1;
 	if (!checksum(sil)) {
-		DBG(DEBUG_LOWPROBE, printf("silicon raid: incorrect checksum\n"));
+		DBG(LOWPROBE, blkid_debug("silicon raid: incorrect checksum"));
 		return -1;
 	}
 

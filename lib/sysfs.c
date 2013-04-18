@@ -88,7 +88,7 @@ dev_t sysfs_devname_to_devno(const char *name, const char *parent)
 		FILE *f;
 		int maj = 0, min = 0;
 
-		f = fopen(path, "r");
+		f = fopen(path, "r" UL_CLOEXECSTR);
 		if (!f)
 			return 0;
 
@@ -149,7 +149,7 @@ int sysfs_init(struct sysfs_cxt *cxt, dev_t devno, struct sysfs_cxt *parent)
 	if (!sysfs_devno_path(devno, path, sizeof(path)))
 		goto err;
 
-	fd = open(path, O_RDONLY);
+	fd = open(path, O_RDONLY|O_CLOEXEC);
 	if (fd < 0)
 		goto err;
 	cxt->dir_fd = fd;
@@ -205,7 +205,7 @@ int sysfs_has_attribute(struct sysfs_cxt *cxt, const char *attr)
 
 static int sysfs_open(struct sysfs_cxt *cxt, const char *attr)
 {
-	int fd = open_at(cxt->dir_fd, cxt->dir_path, attr, O_RDONLY);
+	int fd = open_at(cxt->dir_fd, cxt->dir_path, attr, O_RDONLY|O_CLOEXEC);
 
 	if (fd == -1 && errno == ENOENT &&
 	    strncmp(attr, "queue/", 6) == 0 && cxt->parent) {
@@ -213,7 +213,8 @@ static int sysfs_open(struct sysfs_cxt *cxt, const char *attr)
 		/* Exception for "queue/<attr>". These attributes are available
 		 * for parental devices only
 		 */
-		fd = open_at(cxt->parent->dir_fd, cxt->dir_path, attr, O_RDONLY);
+		fd = open_at(cxt->parent->dir_fd, cxt->dir_path, attr,
+				O_RDONLY|O_CLOEXEC);
 	}
 	return fd;
 }
@@ -264,7 +265,7 @@ static FILE *sysfs_fopen(struct sysfs_cxt *cxt, const char *attr)
 {
 	int fd = sysfs_open(cxt, attr);
 
-	return fd < 0 ? NULL : fdopen(fd, "r");
+	return fd < 0 ? NULL : fdopen(fd, "r" UL_CLOEXECSTR);
 }
 
 
@@ -653,9 +654,10 @@ int sysfs_scsi_get_hctl(struct sysfs_cxt *cxt, int *h, int *c, int *t, int *l)
 		return len;
 
 	buf[len] = '\0';
-	hctl = strrchr(buf, '/') + 1;
+	hctl = strrchr(buf, '/');
 	if (!hctl)
 		return -1;
+	hctl++;
 
 	if (sscanf(hctl, "%d:%d:%d:%d", &cxt->scsi_host, &cxt->scsi_channel,
 				&cxt->scsi_target, &cxt->scsi_lun) != 4)
@@ -705,7 +707,7 @@ char *sysfs_scsi_host_strdup_attribute(struct sysfs_cxt *cxt,
 	    !sysfs_scsi_host_attribute_path(cxt, type, buf, sizeof(buf), attr))
 		return NULL;
 
-	if (!(f = fopen(buf, "r")))
+	if (!(f = fopen(buf, "r" UL_CLOEXECSTR)))
                 return NULL;
 
 	rc = fscanf(f, "%1023[^\n]", buf);

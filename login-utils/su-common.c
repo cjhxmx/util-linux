@@ -387,6 +387,9 @@ authenticate (const struct passwd *pw)
   case RUNUSER_MODE:
     srvname = simulate_login ? PAM_SRVNAME_RUNUSER_L : PAM_SRVNAME_RUNUSER;
     break;
+  default:
+    abort();
+    break;
   }
 
   retval = pam_start (srvname, pw->pw_name, &conv, &pamh);
@@ -732,7 +735,7 @@ su_main (int argc, char **argv, int mode)
   simulate_login = false;
   change_environment = true;
 
-  while ((optc = getopt_long (argc, argv, "+c:fg:G:lmps:u:hV", longopts, NULL)) != -1)
+  while ((optc = getopt_long (argc, argv, "c:fg:G:lmps:u:hV", longopts, NULL)) != -1)
     {
       switch (optc)
 	{

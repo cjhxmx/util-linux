@@ -61,7 +61,7 @@ w
 q
 EOF
 
-sleep 3
+udevadm settle
 
 ts_log "Probe first RAID member"
 $TS_CMD_BLKID -p -o udev $DEVICE1 2>&1 | sort >> $TS_OUTPUT
@@ -72,13 +72,14 @@ $TS_CMD_BLKID -p -o udev $DEVICE1 2>&1 | sort >> $TS_OUTPUT
 ts_log "Stop RAID device"
 /sbin/mdadm -q -S ${MD_DEVICE} >> $TS_OUTPUT 2>&1
 
-sleep 3
+udevadm settle
 
 ts_log "Deinitialize devices"
 ts_device_deinit $DEVICE1
 ts_device_deinit $DEVICE2
 
 ts_fdisk_clean
+
 # remove generated UUIDs
 sed -i -e 's/ID_FS_UUID.*//g' $TS_OUTPUT
 

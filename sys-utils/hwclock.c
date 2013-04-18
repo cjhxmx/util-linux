@@ -382,8 +382,15 @@ mktime_tz(struct tm tm, const bool universal,
 	 */
 	zone = getenv("TZ");	/* remember original time zone */
 	if (universal) {
-		/* Set timezone to UTC */
-		setenv("TZ", "", TRUE);
+		/* Set timezone to UTC as defined by the environment
+		 * variable TZUTC.  TZUTC undefined gives the default UTC
+		 * zonefile which usually does not take into account leap
+		 * seconds.  Define TZUTC to select your UTC zonefile which
+		 * does include leap seconds.  For example, with recent GNU
+		 * libc's:
+		 *    TZUTC=:/usr/share/zoneinfo/right/UTC
+		 */
+		setenv("TZ", getenv("TZUTC"), TRUE);
 		/*
 		 * Note: tzset() gets called implicitly by the time code,
 		 * but only the first time. When changing the environment
@@ -1469,7 +1476,7 @@ static void usage(const char *fmt, ...)
 		"     --noadjfile      do not access %s; this requires the use of\n"
 		"                        either --utc or --localtime\n"
 		"     --adjfile <file> specifies the path to the adjust file;\n"
-		"                        the default is %s\n"), _PATH_ADJPATH, _PATH_ADJPATH);
+		"                        the default is %s\n"), _PATH_ADJTIME, _PATH_ADJTIME);
 	fputs(_("     --test           do not update anything, just show what would happen\n"
 		" -D, --debug          debugging mode\n" "\n"), usageto);
 #ifdef __alpha__
@@ -1739,7 +1746,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!adj_file_name)
-		adj_file_name = _PATH_ADJPATH;
+		adj_file_name = _PATH_ADJTIME;
 
 	if (noadjfile && !utc && !local_opt) {
 		warnx(_("With --noadjfile, you must specify "

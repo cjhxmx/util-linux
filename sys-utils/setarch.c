@@ -90,30 +90,30 @@ enum {
 static void __attribute__((__noreturn__))
 show_help(void)
 {
-   printf(USAGE_HEADER);
-   printf(_(" %s%s [options] [program [program arguments]]\n"),
-         program_invocation_short_name,
+  fputs(USAGE_HEADER, stdout);
+  printf(_(" %s%s [options] [program [program arguments]]\n"),
+	 program_invocation_short_name,
 	 !strcmp(program_invocation_short_name, "setarch") ? " <arch>" : "");
 
-   printf(USAGE_OPTIONS);
-   printf(_(
-   " -v, --verbose            says what options are being switched on\n"
-   " -R, --addr-no-randomize  disables randomization of the virtual address space\n"
-   " -F, --fdpic-funcptrs     makes function pointers point to descriptors\n"
-   " -Z, --mmap-page-zero     turns on MMAP_PAGE_ZERO\n"
-   " -L, --addr-compat-layout changes the way virtual memory is allocated\n"
-   " -X, --read-implies-exec  turns on READ_IMPLIES_EXEC\n"
-   " -B, --32bit              turns on ADDR_LIMIT_32BIT\n"
-   " -I, --short-inode        turns on SHORT_INODE\n"
-   " -S, --whole-seconds      turns on WHOLE_SECONDS\n"
-   " -T, --sticky-timeouts    turns on STICKY_TIMEOUTS\n"
-   " -3, --3gb                limits the used address space to a maximum of 3 GB\n"
-   "     --4gb                ignored (for backward compatibility only)\n"
-   "     --uname-2.6          turns on UNAME26\n"));
+  fputs(USAGE_OPTIONS, stdout);
+  fputs(_(" -v, --verbose            says what options are being switched on\n"), stdout);
+  fputs(_(" -R, --addr-no-randomize  disables randomization of the virtual address space\n"), stdout);
+  fputs(_(" -F, --fdpic-funcptrs     makes function pointers point to descriptors\n"), stdout);
+  fputs(_(" -Z, --mmap-page-zero     turns on MMAP_PAGE_ZERO\n"), stdout);
+  fputs(_(" -L, --addr-compat-layout changes the way virtual memory is allocated\n"), stdout);
+  fputs(_(" -X, --read-implies-exec  turns on READ_IMPLIES_EXEC\n"), stdout);
+  fputs(_(" -B, --32bit              turns on ADDR_LIMIT_32BIT\n"), stdout);
+  fputs(_(" -I, --short-inode        turns on SHORT_INODE\n"), stdout);
+  fputs(_(" -S, --whole-seconds      turns on WHOLE_SECONDS\n"), stdout);
+  fputs(_(" -T, --sticky-timeouts    turns on STICKY_TIMEOUTS\n"), stdout);
+  fputs(_(" -3, --3gb                limits the used address space to a maximum of 3 GB\n"), stdout);
+  fputs(_("     --4gb                ignored (for backward compatibility only)\n"), stdout);
+  fputs(_("     --uname-2.6          turns on UNAME26\n"), stdout);
+  fputs(_("     --list               list settable architectures, and exit\n"), stdout);
 
-  printf(USAGE_SEPARATOR);
-  printf(USAGE_HELP);
-  printf(USAGE_VERSION);
+  fputs(USAGE_SEPARATOR, stdout);
+  fputs(USAGE_HELP, stdout);
+  fputs(USAGE_VERSION, stdout);
   printf(USAGE_MAN_TAIL("setarch(8)"));
 
   exit(EXIT_SUCCESS);
@@ -136,7 +136,7 @@ show_version(void)
 }
 
 static int
-set_arch(const char *pers, unsigned long options)
+set_arch(const char *pers, unsigned long options, int list)
 {
   struct utsname un;
   int i;
@@ -197,6 +197,12 @@ set_arch(const char *pers, unsigned long options)
 #endif
     {-1, NULL, NULL}
   };
+
+  if (list) {
+    for(i = 0; transitions[i].target_arch != NULL; i++)
+      printf("%s\n", transitions[i].target_arch);
+    return 0;
+  }
 
   for(i = 0; transitions[i].perval >= 0; i++)
       if(!strcmp(pers, transitions[i].target_arch))
@@ -273,10 +279,14 @@ int main(int argc, char *argv[])
       show_help();
     else if (!strcmp(p, "-V") || !strcmp(p, "--version"))
       show_version();
+    else if (!strcmp(p, "--list")) {
+      set_arch(argv[0], 0L, 1);
+      return EXIT_SUCCESS;
+    }
   }
   #if defined(__sparc64__) || defined(__sparc__)
    if (!strcmp(p, "sparc32bash")) {
-       if (set_arch(p, 0L))
+       if (set_arch(p, 0L, 0))
            err(EXIT_FAILURE, _("Failed to set personality to %s"), p);
        execl("/bin/bash", NULL);
        err(EXIT_FAILURE, _("failed to execute %s"), "/bin/bash");
@@ -337,7 +347,7 @@ int main(int argc, char *argv[])
   argc -= optind;
   argv += optind;
 
-  if (set_arch(p, options))
+  if (set_arch(p, options, 0))
     err(EXIT_FAILURE, _("Failed to set personality to %s"), p);
 
   if (!argc) {

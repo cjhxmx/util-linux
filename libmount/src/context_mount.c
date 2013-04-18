@@ -24,7 +24,7 @@
 
 /*
  * Kernel supports only one MS_PROPAGATION flag change by one mount(2) syscall,
- * to bypass this restriction we call mount(2) per flag. It's realy not a perfect
+ * to bypass this restriction we call mount(2) per flag. It's really not a perfect
  * solution, but it's the same like to execute multiple mount(8) commands.
  *
  * We use cxt->addmounts (additional mounts) list to keep order of the requested
@@ -274,6 +274,28 @@ static int generate_helper_optstr(struct libmnt_context *cxt, char **optstr)
 	*optstr = mnt_fs_strdup_options(cxt->fs);
 	if (!*optstr)
 		return -ENOMEM;
+
+	if (cxt->user_mountflags & MNT_MS_USER) {
+		/*
+		 * This is unnecessary for real user-mounts as mount.<type>
+		 * helpers have to always follow fstab rather than mount
+		 * options on command line.
+		 *
+		 * But if you call mount.<type> as root then the helper follows
+		 * command line. If there is (for example) "user,exec" in fstab
+		 * then we have to manually append the "exec" back to the options
+		 * string, bacause there is nothing like MS_EXEC (we have only
+		 * MS_NOEXEC in mount flags and we don't care about the original
+		 * mount string in libmount for VFS options).
+		 */
+		if (!(cxt->mountflags & MS_NOEXEC))
+			mnt_optstr_append_option(optstr, "exec", NULL);
+		if (!(cxt->mountflags & MS_NOSUID))
+			mnt_optstr_append_option(optstr, "suid", NULL);
+		if (!(cxt->mountflags & MS_NODEV))
+			mnt_optstr_append_option(optstr, "dev", NULL);
+	}
+
 
 	if (cxt->flags & MNT_FL_SAVED_USER)
 		rc = mnt_optstr_set_option(optstr, "user", cxt->orig_user);
@@ -843,7 +865,7 @@ int mnt_context_do_mount(struct libmnt_context *cxt)
 	type = mnt_fs_get_fstype(cxt->fs);
 	if (type) {
 		if (strchr(type, ','))
-			/* this only happen if fstab countains list of filesystems */
+			/* this only happens if fstab contains list of filesystems */
 			res = do_mount_by_pattern(cxt, type);
 		else
 			res = do_mount(cxt, NULL);

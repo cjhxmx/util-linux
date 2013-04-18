@@ -489,7 +489,6 @@ static const char *get_data(struct libmnt_fs *fs, int num)
 				str = mnt_resolve_spec(str, cache);
 		}
 		if (root && str && !(flags & FL_NOFSROOT) && strcmp(root, "/")) {
-			char *tmp;
 			xasprintf(&tmp, "%s[%s]", str, root);
 			str = tmp;
 		}
@@ -1184,7 +1183,7 @@ int main(int argc, char *argv[])
 	    { "pairs",        0, 0, 'P' },
 	    { "raw",          0, 0, 'r' },
 	    { "types",        1, 0, 't' },
-	    { "fsroot",       0, 0, 'v' },
+	    { "nofsroot",     0, 0, 'v' },
 	    { "submounts",    0, 0, 'R' },
 	    { "source",       1, 0, 'S' },
 	    { "tab-file",     1, 0, 'F' },

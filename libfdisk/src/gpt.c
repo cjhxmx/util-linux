@@ -37,7 +37,6 @@
 #include "fdiskP.h"
 
 #include "nls.h"
-#include "xalloc.h"
 #include "crc32.h"
 #include "blkdev.h"
 #include "bitops.h"
@@ -534,8 +533,9 @@ static ssize_t read_lba(struct fdisk_context *cxt, uint64_t lba,
 {
 	off_t offset = lba * cxt->sector_size;
 
-	lseek(cxt->dev_fd, offset, SEEK_SET);
-	return read(cxt->dev_fd, buffer, bytes);
+	if (lseek(cxt->dev_fd, offset, SEEK_SET) == (off_t) -1)
+		return -1;
+	return read(cxt->dev_fd, buffer, bytes) != bytes;
 }
 
 
@@ -721,7 +721,7 @@ static struct gpt_header *gpt_read_header(struct fdisk_context *cxt,
 		return NULL;
 
 	/* read and verify header */
-	if (!read_lba(cxt, lba, header, sizeof(struct gpt_header)))
+	if (read_lba(cxt, lba, header, sizeof(struct gpt_header)) != 0)
 		goto invalid;
 
 	if (!gpt_check_signature(header))
@@ -1076,10 +1076,12 @@ failed:
 static char *encode_to_utf8(unsigned char *src, size_t count)
 {
 	uint16_t c;
-	char *dest = xmalloc(count * sizeof(char));
+	char *dest;
 	size_t i, j, len = count;
 
-	memset(dest, 0, sizeof(char) * count);
+	dest = calloc(1, count);
+	if (!dest)
+		return NULL;
 
 	for (j = i = 0; i + 2 <= count; i += 2) {
 		/* always little endian */
@@ -1152,8 +1154,10 @@ void gpt_list_table(struct fdisk_context *cxt,
 			continue;
 		sizestr = size_to_human_string(SIZE_SUFFIX_1LETTER,
 					       size * cxt->sector_size);
-		if (!sizestr)
+		if (!sizestr) {
+			free(name);
 			continue;
+		}
 
 		t = fdisk_get_partition_type(cxt, i);
 

@@ -26,7 +26,7 @@ PACKAGE_VERSION_RELEASE=0
 
 dnl libblkid version
 LIBBLKID_VERSION="$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR.$PACKAGE_VERSION_RELEASE"
-LIBBLKID_DATE="04-Sep-2012"
+LIBBLKID_DATE="10-Apr-2013"
 LIBBLKID_LT_MAJOR=1
 LIBBLKID_LT_MINOR=1
 LIBBLKID_LT_MICRO=0
@@ -183,6 +183,7 @@ AC_CHECK_HEADERS([ \
 	linux/raw.h \
 	linux/tiocl.h \
 	linux/version.h \
+	linux/securebits.h \
 	locale.h \
 	mntent.h \
 	net/if.h \
@@ -225,6 +226,7 @@ AC_CHECK_HEADERS([langinfo.h],
 dnl Convert some ac_cv_header_* variables to have_*
 dnl
 have_linux_raw_h=$ac_cv_header_linux_raw_h
+have_linux_securebits_h=$ac_cv_header_linux_securebits_h
 have_linux_watchdog_h=$ac_cv_header_linux_watchdog_h
 have_security_pam_misc_h=$ac_cv_header_security_pam_misc_h
 
@@ -567,6 +569,13 @@ else
   case "$with_selinux:$have_selinux" in
   yes:no) AC_MSG_ERROR([SELinux selected but libselinux not found or too old]);;
   esac
+
+  if test "x$have_selinux" = xyes; then
+    UL_SET_FLAGS([], [], [$SELINUX_LIBS])
+    # This function is missing in old libselinux 1.xx versions
+    AC_CHECK_FUNCS([security_get_initial_context])
+    UL_RESTORE_FLAGS
+  fi
 fi
 AC_SUBST([SELINUX_LIBS])
 AC_SUBST([SELINUX_LIBS_STATIC])
@@ -752,6 +761,18 @@ AC_SUBST([LIBMOUNT_VERSION_INFO])
 AC_DEFINE_UNQUOTED(LIBMOUNT_VERSION, "$LIBMOUNT_VERSION", [libmount version string])
 
 
+dnl
+dnl libfdisk is enabled all time if possible
+dnl
+UL_BUILD_INIT([libfdisk], [check])
+UL_REQUIRES_BUILD([libfdisk], [libuuid])
+AM_CONDITIONAL(BUILD_LIBFDISK, test "x$build_libfdisk" = xyes)
+
+UL_BUILD_INIT([fdisk], [check])
+UL_REQUIRES_BUILD([fdisk], [libfdisk])
+AM_CONDITIONAL(BUILD_FDISK, test "x$build_fdisk" = xyes)
+
+
 AC_ARG_ENABLE([deprecated-mount],
   AS_HELP_STRING([--enable-deprecated-mount], [build old mount utilities]),
   [], enable_deprecated_mount=no
@@ -779,6 +800,15 @@ AC_ARG_ENABLE([losetup],
 UL_BUILD_INIT([losetup])
 UL_REQUIRES_LINUX([losetup])
 AM_CONDITIONAL(BUILD_LOSETUP, test "x$build_losetup" = xyes)
+
+
+AC_ARG_ENABLE([cytune],
+  AS_HELP_STRING([--disable-cytune], [do not build cytune]),
+  [], enable_cytune=check
+)
+UL_BUILD_INIT([cytune])
+UL_REQUIRES_LINUX([cytune])
+AM_CONDITIONAL(BUILD_CYTUNE, test "x$build_cytune" = xyes)
 
 
 AC_ARG_ENABLE([fsck],
@@ -882,7 +912,7 @@ AC_ARG_ENABLE([nsenter],
 )
 UL_BUILD_INIT([nsenter])
 UL_REQUIRES_LINUX([nsenter])
-UL_REQUIRES_SYSCALL_CHECK([setns], [UL_CHECK_SYSCALL([setns])])
+UL_REQUIRES_SYSCALL_CHECK([nsenter], [UL_CHECK_SYSCALL([setns])], [setns])
 AM_CONDITIONAL(BUILD_NSENTER, test "x$build_nsenter" = xyes)
 if test "x$build_nsenter" = xyes; then
   AC_CHECK_FUNCS([setns])
@@ -898,6 +928,7 @@ AC_ARG_ENABLE([setpriv],
 )
 UL_BUILD_INIT([setpriv])
 UL_REQUIRES_LINUX([setpriv])
+UL_REQUIRES_HAVE([setpriv], [linux_securebits_h], [securebits.h header file])
 UL_REQUIRES_HAVE([setpriv], [cap_ng], [libcap-ng])
 AM_CONDITIONAL(BUILD_SETPRIV, test "x$build_setpriv" = xyes)
 
@@ -930,9 +961,31 @@ UL_REQUIRES_HAVE([cramfs], [z], [z library])
 AM_CONDITIONAL(BUILD_CRAMFS, test "x$build_cramfs" = xyes)
 
 
-if test "x$have_io" = xyes -o "x$linux_os" = xyes; then
-  build_hwclock=yes
-fi
+AC_ARG_ENABLE([bfs],
+  AS_HELP_STRING([--disable-bfs], [do not build mkfs.bfs]),
+  [], enable_bfs=yes
+)
+UL_BUILD_INIT([bfs])
+AM_CONDITIONAL(BUILD_BFS, test "x$build_bfs" = xyes)
+
+
+AC_ARG_ENABLE([fdformat],
+  AS_HELP_STRING([--disable-fdformat], [do not build fdformat]),
+  [], enable_fdformat=yes
+)
+UL_BUILD_INIT([fdformat])
+UL_REQUIRES_LINUX([fdformat])
+AM_CONDITIONAL(BUILD_FDFORMAT, test "x$build_fdformat" = xyes)
+
+
+AC_ARG_ENABLE([hwclock],
+  AS_HELP_STRING([--disable-hwclock], [do not build hwclock]),
+  [], enable_hwclock=check
+)
+have_linuxdummy=$linux_os
+
+UL_BUILD_INIT([hwclock])
+UL_REQUIRES_HAVE([hwclock], [io, linuxdummy], [ioperm iopl function or Linux])
 AM_CONDITIONAL(BUILD_HWCLOCK, test "x$build_hwclock" = xyes)
 
 
@@ -988,6 +1041,7 @@ fi
 
 UL_BUILD_INIT([lslocks], [check])
 UL_REQUIRES_LINUX([lslocks])
+UL_REQUIRES_BUILD([lslocks], [libmount])
 AM_CONDITIONAL(BUILD_LSLOCKS, test "x$build_lslocks" = xyes)
 
 
@@ -1118,13 +1172,18 @@ AC_ARG_WITH([user], AS_HELP_STRING([--without-user], [compile without libuser (r
 if test "x$with_user" = xno; then
   AM_CONDITIONAL(HAVE_USER, false)
 else
-  PKG_CHECK_MODULES(LIBUSER,[libuser >= 0.58])
+  PKG_CHECK_MODULES(LIBUSER,[libuser >= 0.58], [have_user=yes], [have_user=no])
   UL_CHECK_LIB(user, lu_start)
   case "$with_user:$have_user" in
   yes:no)
    AC_MSG_ERROR([user selected but libuser not found])
    ;;
   esac
+  # temporary solution, libuser has stupid .pc where are exported all
+  # private dependencies to Requires: instead of Requires.private:
+  if test "x$have_user" = xyes; then
+    LIBUSER_LIBS=-luser
+  fi
 fi
 
 AC_ARG_ENABLE([chfn-chsh-password],
@@ -1317,6 +1376,25 @@ fi
 AM_CONDITIONAL(HAVE_SYSTEMD, [test -n "$with_systemdsystemunitdir" -a "x$with_systemdsystemunitdir" != "xno" ])
 
 
+AC_ARG_WITH([bashcompletiondir],
+  AS_HELP_STRING([--with-bashcompletiondir=DIR], [Bash completions directory]),
+  [],
+  [AS_IF([$($PKG_CONFIG --exists bash-completion)], [
+    with_bashcompletiondir=$($PKG_CONFIG --variable=completionsdir bash-completion)
+  ], [
+    with_bashcompletiondir=${datadir}/bash-completion/completions
+  ])
+])
+AC_SUBST([bashcompletiondir], [$with_bashcompletiondir])
+
+AC_ARG_ENABLE([bash-completion],
+  AS_HELP_STRING([--disable-bash-completion], [do not install bash completion files]),
+  [], enable_bash_completion=yes
+)
+
+AM_CONDITIONAL(BUILD_BASH_COMPLETION, test "x$enable_bash_completion" = xyes)
+
+
 AC_ARG_ENABLE([pg-bell],
   AS_HELP_STRING([--disable-pg-bell], [let pg not ring the bell on invalid keys]),
   [], enable_pg_bell=yes
@@ -1438,6 +1516,7 @@ AC_MSG_RESULT([
 	suid cflags:       ${SUID_CFLAGS}
 	ldflags:           ${LDFLAGS}
 	suid ldflags:      ${SUID_LDFLAGS}
+	Bash completions dir: ${with_bashcompletiondir}
 
 	warnings:
 

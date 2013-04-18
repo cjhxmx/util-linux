@@ -216,7 +216,7 @@ get_desc_for_probe(struct wipe_desc *wp, blkid_probe pr)
 static blkid_probe
 new_probe(const char *devname, int mode)
 {
-	blkid_probe pr;
+	blkid_probe pr = NULL;
 
 	if (!devname)
 		return NULL;
@@ -227,8 +227,10 @@ new_probe(const char *devname, int mode)
 			goto error;
 
 		pr = blkid_new_probe();
-		if (pr && blkid_probe_set_device(pr, fd, 0, 0))
+		if (pr && blkid_probe_set_device(pr, fd, 0, 0)) {
+			close(fd);
 			goto error;
+		}
 	} else
 		pr = blkid_new_probe_from_filename(devname);
 
@@ -245,6 +247,7 @@ new_probe(const char *devname, int mode)
 
 	return pr;
 error:
+	blkid_free_probe(pr);
 	err(EXIT_FAILURE, _("error: %s: probing initialization failed"), devname);
 	return NULL;
 }
@@ -311,7 +314,7 @@ do_wipe(struct wipe_desc *wp, const char *devname, int noact, int all, int quiet
 {
 	int flags;
 	blkid_probe pr;
-	struct wipe_desc *w, *wp0 = clone_offset(wp);
+	struct wipe_desc *w, *wp0;
 	int zap = all ? 1 : wp->zap;
 
 	flags = O_RDWR;
@@ -320,6 +323,8 @@ do_wipe(struct wipe_desc *wp, const char *devname, int noact, int all, int quiet
 	pr = new_probe(devname, flags);
 	if (!pr)
 		return NULL;
+
+	wp0 = clone_offset(wp);
 
 	while (blkid_do_probe(pr) == 0) {
 		wp = get_desc_for_probe(wp, pr);
@@ -413,7 +418,7 @@ main(int argc, char **argv)
 	textdomain(PACKAGE);
 	atexit(close_stdout);
 
-	while ((c = getopt_long(argc, argv, "ahno:pqt:V", longopts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "afhno:pqt:V", longopts, NULL)) != -1) {
 
 		err_exclusive_options(c, longopts, excl, excl_st);
 

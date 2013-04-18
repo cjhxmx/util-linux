@@ -75,8 +75,8 @@ struct file_attribute {
 #define NTFS_MAX_CLUSTER_SIZE	(64 * 1024)
 
 enum {
-	MFT_RECORD_ATTR_VOLUME_NAME		= cpu_to_le32(0x60),
-	MFT_RECORD_ATTR_END			= cpu_to_le32(0xffffffff)
+	MFT_RECORD_ATTR_VOLUME_NAME		= 0x60,
+	MFT_RECORD_ATTR_END			= 0xffffffff
 };
 
 static int probe_ntfs(blkid_probe pr, const struct blkid_idmag *mag)
@@ -149,9 +149,9 @@ static int probe_ntfs(blkid_probe pr, const struct blkid_idmag *mag)
 	off = le64_to_cpu(ns->mft_cluster_location) * sector_size *
 		sectors_per_cluster;
 
-	DBG(DEBUG_LOWPROBE, printf("NTFS: sector_size=%d, mft_record_size=%d, "
+	DBG(LOWPROBE, blkid_debug("NTFS: sector_size=%d, mft_record_size=%d, "
 			"sectors_per_cluster=%d, nr_clusters=%ju "
-			"cluster_offset=%jd\n",
+			"cluster_offset=%jd",
 			(int) sector_size, mft_record_size,
 			sectors_per_cluster, nr_clusters,
 			off));
@@ -186,9 +186,9 @@ static int probe_ntfs(blkid_probe pr, const struct blkid_idmag *mag)
 		if (!attr_len)
 			break;
 
-		if (attr->type == MFT_RECORD_ATTR_END)
+		if (le32_to_cpu(attr->type) == MFT_RECORD_ATTR_END)
 			break;
-		if (attr->type == MFT_RECORD_ATTR_VOLUME_NAME) {
+		if (le32_to_cpu(attr->type) == MFT_RECORD_ATTR_VOLUME_NAME) {
 			unsigned int val_off = le16_to_cpu(attr->value_offset);
 			unsigned int val_len = le32_to_cpu(attr->value_len);
 			unsigned char *val = ((uint8_t *) attr) + val_off;

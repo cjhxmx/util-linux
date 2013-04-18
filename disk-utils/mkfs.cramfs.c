@@ -144,7 +144,7 @@ usage(int status) {
 static char *
 do_mmap(char *path, unsigned int size, unsigned int mode){
 	int fd;
-	char *start;
+	char *start = NULL;
 
 	if (!size)
 		return NULL;
@@ -152,26 +152,31 @@ do_mmap(char *path, unsigned int size, unsigned int mode){
 	if (S_ISLNK(mode)) {
 		start = xmalloc(size);
 		if (readlink(path, start, size) < 0) {
-			perror(path);
+			warn(_("readlink failed: %s"), path);
 			warn_skip = 1;
-			start = NULL;
+			goto err;
 		}
 		return start;
 	}
 
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		perror(path);
+		warn(_("open failed: %s"), path);
 		warn_skip = 1;
-		return NULL;
+		goto err;
 	}
 
 	start = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (-1 == (int) (long) start)
+	if (-1 == (int) (long) start) {
+		free(start);
+		close(fd);
 		err(MKFS_EX_ERROR, "mmap");
+	}
 	close(fd);
-
 	return start;
+err:
+	free(start);
+	return NULL;
 }
 
 static void
@@ -213,8 +218,10 @@ identical_file(struct entry *e1, struct entry *e2){
 	if (!start1)
 		return 0;
 	start2 = do_mmap(e2->path, e2->size, e2->mode);
-	if (!start2)
+	if (!start2) {
+		do_munmap(start1, e1->size, e1->mode);
 		return 0;
+	}
 	equal = !memcmp(start1, start2, e1->size);
 	do_munmap(start1, e1->size, e1->mode);
 	do_munmap(start2, e2->size, e2->mode);

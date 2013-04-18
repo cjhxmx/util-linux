@@ -22,11 +22,13 @@ dist_man_MANS += disk-utils/isosize.8
 isosize_SOURCES = disk-utils/isosize.c
 isosize_LDADD = $(LDADD) libcommon.la
 
+if BUILD_BFS
 sbin_PROGRAMS += mkfs.bfs
 dist_man_MANS += disk-utils/mkfs.bfs.8
 mkfs_bfs_SOURCES = \
 	disk-utils/mkfs.bfs.c
 mkfs_bfs_LDADD = $(LDADD) libcommon.la
+endif
 
 sbin_PROGRAMS += mkswap
 dist_man_MANS += disk-utils/mkswap.8
@@ -92,10 +94,12 @@ cramfs_common_sources = disk-utils/cramfs.h disk-utils/cramfs_common.c
 sbin_PROGRAMS += fsck.cramfs
 fsck_cramfs_SOURCES = disk-utils/fsck.cramfs.c $(cramfs_common_sources)
 fsck_cramfs_LDADD = $(LDADD) -lz libcommon.la
+dist_man_MANS += disk-utils/fsck.cramfs.8
 
 sbin_PROGRAMS += mkfs.cramfs
 mkfs_cramfs_SOURCES = disk-utils/mkfs.cramfs.c $(cramfs_common_sources)
 mkfs_cramfs_LDADD = $(LDADD) -lz libcommon.la
+dist_man_MANS += disk-utils/mkfs.cramfs.8
 
 check_PROGRAMS += test_fsck.cramfs
 test_fsck_cramfs_SOURCES = $(fsck_cramfs_SOURCES)
@@ -103,18 +107,18 @@ test_fsck_cramfs_LDADD = $(fsck_cramfs_LDADD)
 test_fsck_cramfs_CFLAGS = $(AM_CFLAGS) -DINCLUDE_FS_TESTS
 endif
 
+if BUILD_FDFORMAT
+usrsbin_exec_PROGRAMS += fdformat
+dist_man_MANS += disk-utils/fdformat.8
+fdformat_SOURCES = disk-utils/fdformat.c
+endif
 
 if LINUX
 sbin_PROGRAMS += blockdev
 dist_man_MANS += disk-utils/blockdev.8
 blockdev_SOURCES = disk-utils/blockdev.c
 blockdev_LDADD = $(LDADD) libcommon.la
-
-usrsbin_exec_PROGRAMS += fdformat
-dist_man_MANS += disk-utils/fdformat.8
-fdformat_SOURCES = disk-utils/fdformat.c
-endif # LINUX
-
+endif
 
 if BUILD_PARTX
 usrsbin_exec_PROGRAMS += partx addpart delpart resizepart
