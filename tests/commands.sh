@@ -22,6 +22,8 @@ TS_HELPER_STRUTILS="$top_builddir/test_strutils"
 TS_HELPER_SYSINFO="$top_builddir/test_sysinfo"
 
 # paths to commands
+TS_CMD_ADDPART=${TS_CMD_ADDPART:-"$top_builddir/addpart"}
+TS_CMD_DELPART=${TS_CMD_DELPART:-"$top_builddir/delpart"}
 TS_CMD_BLKID=${TS_CMD_BLKID-"$top_builddir/blkid"}
 TS_CMD_CAL=${TS_CMD_CAL-"$top_builddir/cal"}
 TS_CMD_COLRM=${TS_CMD_COLRM:-"$top_builddir/colrm"}
@@ -64,3 +66,4 @@ TS_CMD_UL=${TS_CMD_UL-"$top_builddir/ul"}
 TS_CMD_UMOUNT=${TS_CMD_UMOUNT:-"$top_builddir/umount"}
 TS_CMD_UTMPDUMP=${TS_CMD_UTMPDUMP-"$top_builddir/utmpdump"}
 TS_CMD_WHEREIS=${TS_CMD_WHEREIS-"$top_builddir/whereis"}
+TS_CMD_WIPEFS=${TS_CMD_WIPEFS-"$top_builddir/wipefs"}

@@ -434,6 +434,7 @@ int main(int argc, char **argv)
 					|| strcmp(optarg, "on") == 0
 					|| strcmp(optarg, "no") == 0
 					|| strcmp(optarg, "off") == 0
+					|| strcmp(optarg, "freeze") == 0
 					|| strcmp(optarg, "disable") == 0
 					|| strcmp(optarg, "show") == 0
 			   ) {
@@ -568,13 +569,14 @@ int main(int argc, char **argv)
 		dryrun = 1;	/* to skip disabling alarm at the end */
 
 	} else if (strcmp(suspend, "off") == 0) {
-		char *arg[4];
+		char *arg[5];
 		int i = 0;
 
 		if (verbose)
 			printf(_("suspend mode: off; executing %s\n"),
 						_PATH_SHUTDOWN);
 		arg[i++] = _PATH_SHUTDOWN;
+		arg[i++] = "-h";
 		arg[i++] = "-P";
 		arg[i++] = "now";
 		arg[i]   = NULL;

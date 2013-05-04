@@ -26,7 +26,7 @@ PACKAGE_VERSION_RELEASE=0
 
 dnl libblkid version
 LIBBLKID_VERSION="$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR.$PACKAGE_VERSION_RELEASE"
-LIBBLKID_DATE="10-Apr-2013"
+LIBBLKID_DATE="25-Apr-2013"
 LIBBLKID_LT_MAJOR=1
 LIBBLKID_LT_MINOR=1
 LIBBLKID_LT_MICRO=0
@@ -929,7 +929,7 @@ AC_ARG_ENABLE([setpriv],
 UL_BUILD_INIT([setpriv])
 UL_REQUIRES_LINUX([setpriv])
 UL_REQUIRES_HAVE([setpriv], [linux_securebits_h], [securebits.h header file])
-UL_REQUIRES_HAVE([setpriv], [cap_ng], [libcap-ng])
+UL_REQUIRES_HAVE([setpriv], [cap_ng], [libcap-ng library])
 AM_CONDITIONAL(BUILD_SETPRIV, test "x$build_setpriv" = xyes)
 
 
@@ -971,7 +971,7 @@ AM_CONDITIONAL(BUILD_BFS, test "x$build_bfs" = xyes)
 
 AC_ARG_ENABLE([fdformat],
   AS_HELP_STRING([--disable-fdformat], [do not build fdformat]),
-  [], enable_fdformat=yes
+  [], enable_fdformat=check
 )
 UL_BUILD_INIT([fdformat])
 UL_REQUIRES_LINUX([fdformat])
@@ -1167,17 +1167,16 @@ AM_CONDITIONAL(BUILD_NEWGRP, test "x$build_newgrp" = xyes)
 
 
 AC_ARG_WITH([user], AS_HELP_STRING([--without-user], [compile without libuser (remote chsh)]),
-  [], with_user=auto
+  [], with_user=check
 )
-if test "x$with_user" = xno; then
-  AM_CONDITIONAL(HAVE_USER, false)
-else
+have_user=no
+if test "x$with_user" != xno; then
   PKG_CHECK_MODULES(LIBUSER,[libuser >= 0.58], [have_user=yes], [have_user=no])
-  UL_CHECK_LIB(user, lu_start)
   case "$with_user:$have_user" in
   yes:no)
-   AC_MSG_ERROR([user selected but libuser not found])
-   ;;
+   AC_MSG_ERROR([user selected but libuser not found]) ;;
+  *:yes)
+   AC_DEFINE(HAVE_LIBUSER, 1, [Define if libuser is available]) ;;
   esac
   # temporary solution, libuser has stupid .pc where are exported all
   # private dependencies to Requires: instead of Requires.private:
@@ -1185,6 +1184,7 @@ else
     LIBUSER_LIBS=-luser
   fi
 fi
+AM_CONDITIONAL(HAVE_USER, test "x$have_user" = xyes)
 
 AC_ARG_ENABLE([chfn-chsh-password],
   AS_HELP_STRING([--disable-chfn-chsh-password], [do not require the user to enter the password in chfn and chsh]),
@@ -1216,7 +1216,7 @@ fi
 
 AC_ARG_ENABLE([login],
   AS_HELP_STRING([--disable-login], [do not build login]),
-  [], enable_login=yes
+  [], enable_login=check
 )
 UL_BUILD_INIT([login])
 UL_REQUIRES_HAVE([login], [security_pam_misc_h], [PAM header file])
@@ -1251,7 +1251,7 @@ AM_CONDITIONAL(BUILD_SULOGIN, test "x$build_sulogin" = xyes)
 
 AC_ARG_ENABLE([su],
   AS_HELP_STRING([--disable-su], [do not build su]),
-  [], enable_su=yes
+  [], enable_su=check
 )
 UL_BUILD_INIT([su])
 UL_REQUIRES_HAVE([su], [security_pam_misc_h], [PAM header file])
@@ -1260,7 +1260,7 @@ AM_CONDITIONAL(BUILD_SU, test "x$build_su" = xyes)
 
 AC_ARG_ENABLE([runuser],
   AS_HELP_STRING([--disable-runuser], [do not build runuser]),
-  [], enable_runuser=yes
+  [], enable_runuser=check
 )
 UL_BUILD_INIT([runuser])
 UL_REQUIRES_HAVE([runuser], [security_pam_misc_h], [PAM header file])
@@ -1292,6 +1292,16 @@ AC_ARG_ENABLE([pg],
 UL_BUILD_INIT([pg])
 UL_REQUIRES_HAVE([pg], [ncurses], [ncurses or ncursesw library])
 AM_CONDITIONAL(BUILD_PG, test "x$build_pg" = xyes)
+
+
+AC_ARG_ENABLE([setterm],
+  AS_HELP_STRING([--disable-setterm], [do not build setterm]),
+  [], enable_setterm=check
+)
+UL_BUILD_INIT([setterm])
+UL_REQUIRES_LINUX([setterm])
+UL_REQUIRES_HAVE([setterm], [ncurses], [ncurses library])
+AM_CONDITIONAL(BUILD_SETTERM, test "x$build_setterm" = xyes)
 
 
 AC_ARG_ENABLE([schedutils],

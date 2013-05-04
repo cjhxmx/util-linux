@@ -77,10 +77,7 @@ struct gpt_guid {
 			     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }})
 
 /* Linux native partition type */
-#define GPT_DEFAULT_ENTRY_GUID						\
-	((struct gpt_guid) { 0x0FC63DAF, 0x8483, 0x4772, 0x8E, 0x79,	\
-			     { 0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4 }})
-
+#define GPT_DEFAULT_ENTRY_TYPE "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 
 /*
  * Attribute bits
@@ -168,7 +165,7 @@ static struct fdisk_parttype gpt_parttypes[] =
 	DEF_GUID("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7", N_("Microsoft basic data")),
 	DEF_GUID("5808C8AA-7E8F-42E0-85D2-E1E90434CFB3", N_("Microsoft LDM metadata")),
 	DEF_GUID("AF9B60A0-1431-4F62-BC68-3311714A69AD", N_("Microsoft LDM data")),
-	DEF_GUID("DE94BBA4-06D1-4D40-A16A-BFD50179D6AC", N_("Windows recovery evironmnet")),
+	DEF_GUID("DE94BBA4-06D1-4D40-A16A-BFD50179D6AC", N_("Windows recovery evironment")),
 	DEF_GUID("37AFFC90-EF7D-4E96-91C3-2D7AE055B174", N_("IBM General Parallel Fs")),
 
 	/* HP-UX */
@@ -272,6 +269,23 @@ static uint64_t gpt_partition_size(const struct gpt_entry *e)
 	return start > end ? 0 : end - start + 1ULL;
 }
 
+#ifdef CONFIG_LIBFDISK_DEBUG
+/* prints UUID in the real byte order! */
+static void dbgprint_uuid(const char *mesg, struct gpt_guid *guid)
+{
+	const unsigned char *uuid = (unsigned char *) guid;
+
+	fprintf(stderr, "%s: "
+		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
+		mesg,
+		uuid[0], uuid[1], uuid[2], uuid[3],
+		uuid[4], uuid[5],
+		uuid[6], uuid[7],
+		uuid[8], uuid[9],
+		uuid[10], uuid[11], uuid[12], uuid[13], uuid[14],uuid[15]);
+}
+#endif
+
 /*
  * UUID is traditionally 16 byte big-endian array, except Intel EFI
  * specification where the UUID is a structure of little-endian fields.
@@ -283,18 +297,21 @@ static void swap_efi_guid(struct gpt_guid *uid)
 	uid->time_hi_and_version = swab16(uid->time_hi_and_version);
 }
 
-static int string_to_uuid(const char *in, struct gpt_guid *uuid)
+static int string_to_guid(const char *in, struct gpt_guid *guid)
 {
-	if (uuid_parse(in, (unsigned char *) uuid))
+	if (uuid_parse(in, (unsigned char *) guid))	/* BE */
 		return -1;
-
-	swap_efi_guid(uuid);
+	swap_efi_guid(guid);				/* LE */
 	return 0;
 }
 
-static char *uuid_to_string(struct gpt_guid *uuid, char *out)
+static char *guid_to_string(struct gpt_guid *guid, char *out)
 {
-	uuid_unparse_upper((unsigned char *) uuid, out);
+	struct gpt_guid u = *guid;	/* LE */
+
+	swap_efi_guid(&u);		/* BE */
+	uuid_unparse_upper((unsigned char *) &u, out);
+
 	return out;
 }
 
@@ -466,7 +483,7 @@ static int valid_pmbr(struct fdisk_context *cxt)
 
 	pmbr = (struct gpt_legacy_mbr *) cxt->firstsector;
 
-	if (pmbr->signature != cpu_to_le64(MSDOS_MBR_SIGNATURE))
+	if (le16_to_cpu(pmbr->signature) != MSDOS_MBR_SIGNATURE)
 		goto done;
 
 	/* LBA of the GPT partition header */
@@ -475,7 +492,7 @@ static int valid_pmbr(struct fdisk_context *cxt)
 		goto done;
 
 	/* seems like a valid MBR was found, check DOS primary partitions */
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 4; i++) {
 		if (pmbr->partition_record[i].os_type == EFI_PMBR_OSTYPE) {
 			/*
 			 * Ok, we at least know that there's a protective MBR,
@@ -485,14 +502,15 @@ static int valid_pmbr(struct fdisk_context *cxt)
 			ret = GPT_MBR_PROTECTIVE;
 			goto check_hybrid;
 		}
-
+	}
 check_hybrid:
 	if (ret != GPT_MBR_PROTECTIVE)
 		goto done;
-	for (i = 0 ; i < 4; i++)
+	for (i = 0 ; i < 4; i++) {
 		if ((pmbr->partition_record[i].os_type != EFI_PMBR_OSTYPE) &&
 		    (pmbr->partition_record[i].os_type != 0x00))
 			ret = GPT_MBR_HYBRID;
+	}
 
 	/*
 	 * Protective MBRs take up the lesser of the whole disk
@@ -500,10 +518,11 @@ check_hybrid:
 	 *
 	 * Hybrid MBRs do not necessarily comply with this.
 	 */
-	if (ret == GPT_MBR_PROTECTIVE)
-		if (pmbr->partition_record[0].size_in_lba !=
-		    cpu_to_le32(min((uint32_t) cxt->total_sectors - 1, 0xFFFFFFFF)))
+	if (ret == GPT_MBR_PROTECTIVE) {
+		if (le32_to_cpu(pmbr->partition_record[0].size_in_lba) !=
+		    min((uint32_t) cxt->total_sectors - 1, 0xFFFFFFFF))
 			ret = 0;
+	}
 done:
 	return ret;
 }
@@ -841,9 +860,10 @@ static uint32_t partition_check_overlaps(struct gpt_header *header, struct gpt_e
 			if (partition_unused(&e[i]) ||
 			    partition_unused(&e[j]))
 				continue;
-			if (partition_overlap(&e[i], &e[j]))
-				/* two overlaping partitions is enough! */
+			if (partition_overlap(&e[i], &e[j])) {
+				DBG(LABEL, dbgprint("GPT partitions overlap detected [%u vs. %u]", i, j));
 				return i + 1;
+			}
 		}
 
 	return 0;
@@ -1284,11 +1304,11 @@ static int gpt_write_disklabel(struct fdisk_context *cxt)
 		goto err0;
 
 	/* check that disk is big enough to handle the backup header */
-	if (gpt->pheader->alternative_lba > cxt->total_sectors)
+	if (le64_to_cpu(gpt->pheader->alternative_lba) > cxt->total_sectors)
 		goto err0;
 
 	/* check that the backup header is properly placed */
-	if (gpt->pheader->alternative_lba < cxt->total_sectors - 1)
+	if (le64_to_cpu(gpt->pheader->alternative_lba) < cxt->total_sectors - 1)
 		/* TODO: correct this (with user authorization) and write */
 		goto err0;
 
@@ -1311,7 +1331,8 @@ static int gpt_write_disklabel(struct fdisk_context *cxt)
 	 */
 	if (gpt_write_partitions(cxt, gpt->bheader, gpt->ents) != 0)
 		goto err1;
-	if (gpt_write_header(cxt, gpt->bheader, gpt->pheader->alternative_lba) != 0)
+	if (gpt_write_header(cxt, gpt->bheader,
+			     le64_to_cpu(gpt->pheader->alternative_lba)) != 0)
 		goto err1;
 	if (gpt_write_partitions(cxt, gpt->pheader, gpt->ents) != 0)
 		goto err1;
@@ -1320,10 +1341,14 @@ static int gpt_write_disklabel(struct fdisk_context *cxt)
 	if (gpt_write_pmbr(cxt) != 0)
 		goto err1;
 
+	DBG(LABEL, dbgprint("GPT write success"));
 	return 0;
 err0:
+	DBG(LABEL, dbgprint("GPT write failed: incorrect input"));
+	errno = EINVAL;
 	return -EINVAL;
 err1:
+	DBG(LABEL, dbgprint("GPT write failed: %m"));
 	return -errno;
 }
 
@@ -1381,7 +1406,7 @@ static int gpt_verify_disklabel(struct fdisk_context *cxt)
 		fdisk_warnx(cxt, _("MyLBA mismatch with real position at backup header."));
 
 	}
-	if (gpt->pheader->alternative_lba >= cxt->total_sectors) {
+	if (le64_to_cpu(gpt->pheader->alternative_lba) >= cxt->total_sectors) {
 		nerror++;
 		fdisk_warnx(cxt, _("Disk is to small to hold all data."));
 	}
@@ -1390,7 +1415,8 @@ static int gpt_verify_disklabel(struct fdisk_context *cxt)
 	 * if the GPT is the primary table, check the alternateLBA
 	 * to see if it is a valid GPT
 	 */
-	if (gpt->bheader && (gpt->pheader->my_lba != gpt->bheader->alternative_lba)) {
+	if (gpt->bheader && (le64_to_cpu(gpt->pheader->my_lba) !=
+			     le64_to_cpu(gpt->bheader->alternative_lba))) {
 		nerror++;
 		fdisk_warnx(cxt, _("Primary and backup header mismatch."));
 	}
@@ -1467,27 +1493,10 @@ static int gpt_delete_partition(struct fdisk_context *cxt,
 	return 0;
 }
 
-static void gpt_entry_set_type(struct gpt_entry *e, struct gpt_guid *type)
+static void gpt_entry_set_type(struct gpt_entry *e, struct gpt_guid *uuid)
 {
-	size_t i;
-
-	/*
-	 * Copy corresponding partition type GUID. Only the first three blocks
-	 * are endian-aware.
-	 */
-	e->partition_type_guid.time_low = cpu_to_le32(type->time_low);
-	e->partition_type_guid.time_mid = cpu_to_le16(type->time_mid);
-	e->partition_type_guid.time_hi_and_version = cpu_to_le16(type->time_hi_and_version);
-	e->partition_type_guid.clock_seq_hi = type->clock_seq_hi;
-	e->partition_type_guid.clock_seq_low = type->clock_seq_low;
-	for (i = 0; i < 6; i++)
-		e->partition_type_guid.node[i] = type->node[i];
-
-	DBG(LABEL, fprintf(stderr, "new type: %08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X\n",
-		type->time_low, type->time_mid, type->time_hi_and_version,
-		type->clock_seq_hi, type->clock_seq_low,
-		type->node[0], type->node[1], type->node[2],
-		type->node[3], type->node[4], type->node[5]));
+	e->partition_type_guid = *uuid;
+	DBG(LABEL, dbgprint_uuid("new type", &(e->partition_type_guid)));
 }
 
 /*
@@ -1520,12 +1529,6 @@ static int gpt_create_new_partition(struct fdisk_context *cxt,
 
 	gpt_entry_set_type(e, type);
 
-	/* deal with partition name
-	for (i = 0; i < GPT_PART_NAME_LEN; i++)
-		e->partition_name[i] =
-			cpu_to_le16((uint16_t) gpt_sys_types[sys].name[i]);
-	*/
-
 	/*
 	 * Any time a new partition entry is created a new GUID must be
 	 * generated for that partition, and every partition is guaranteed
@@ -1552,7 +1555,7 @@ static int gpt_add_partition(
 	uint64_t user_f, user_l;	/* user input ranges for first and last sectors */
 	uint64_t disk_f, disk_l;	/* first and last available sector ranges on device*/
 	uint64_t dflt_f, dflt_l;	/* largest segment (default) */
-	struct gpt_guid uuid = GPT_DEFAULT_ENTRY_GUID;
+	struct gpt_guid typeid;
 	struct fdisk_gpt_label *gpt;
 	struct gpt_header *pheader;
 	struct gpt_entry *ents;
@@ -1597,8 +1600,7 @@ static int gpt_add_partition(
 	/* align the default in range <dflt_f,dflt_l>*/
 	dflt_f = fdisk_align_lba_in_range(cxt, dflt_f, dflt_f, dflt_l);
 
-	if (t && t->typestr)
-		string_to_uuid(t->typestr, &uuid);
+	string_to_guid(t && t->typestr ? t->typestr : GPT_DEFAULT_ENTRY_TYPE, &typeid);
 
 	/* get user input for first and last sectors of the new partition */
 	for (;;) {
@@ -1649,7 +1651,7 @@ static int gpt_add_partition(
 	}
 
 	if (gpt_create_new_partition(cxt, partnum,
-				     user_f, user_l, &uuid, ents) != 0)
+				     user_f, user_l, &typeid, ents) != 0)
 		fdisk_warnx(cxt, _("Could not create partition %zd"), partnum + 1);
 	else {
 		fdisk_info(cxt, _("Created partition %zd\n"), partnum + 1);
@@ -1746,7 +1748,6 @@ static struct fdisk_parttype *gpt_get_partition_type(
 		size_t i)
 {
 	struct fdisk_parttype *t;
-	struct gpt_guid uuid;
 	char str[37];
 	struct fdisk_gpt_label *gpt;
 
@@ -1759,10 +1760,7 @@ static struct fdisk_parttype *gpt_get_partition_type(
 	if ((uint32_t) i >= le32_to_cpu(gpt->pheader->npartition_entries))
 		return NULL;
 
-	uuid = gpt->ents[i].partition_type_guid;
-	swap_efi_guid(&uuid);
-
-	uuid_to_string(&uuid, str);
+	guid_to_string(&gpt->ents[i].partition_type_guid, str);
 	t = fdisk_get_parttype_from_string(cxt, str);
 	if (!t)
 		t = fdisk_new_unknown_parttype(0, str);
@@ -1785,7 +1783,7 @@ static int gpt_set_partition_type(
 
 	gpt = self_label(cxt);
 	if ((uint32_t) i >= le32_to_cpu(gpt->pheader->npartition_entries)
-	     || !t || !t->typestr || string_to_uuid(t->typestr, &uuid) != 0)
+	     || !t || !t->typestr || string_to_guid(t->typestr, &uuid) != 0)
 		return -EINVAL;
 
 	gpt_entry_set_type(&gpt->ents[i], &uuid);
