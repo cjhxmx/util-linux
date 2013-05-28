@@ -10,6 +10,9 @@ version.
 
 The command chkdupexe has been REMOVED from util-linux.
 
+The command ddate has been REMOVED from util-linux.  You can find it here:
+https://github.com/bo0ts/ddate
+
 The library libblkid supports LIBBLKID_DEBUG=<mask> environment variable to
 print debug messages on stderr. The old BLKID_DEBUG= is no more supported.
 
@@ -147,7 +150,7 @@ bash-completion:
    - Don't offer any more completions after help or version.  [Ville Skyttä]
    - Don't offer short options where corresponding long one exists.  [Ville Skyttä]
    - Symlink runuser symlink to su so it gets loaded on demand.  [Ville Skyttä]
-   - add bash completetion configure option  [Sami Kerola]
+   - add bash completion configure option  [Sami Kerola]
    - add completion files to Makefile.am  [Sami Kerola]
    - add swapoff  [Bernhard Voelker]
    - disk-utils  [Sami Kerola]

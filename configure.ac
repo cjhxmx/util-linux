@@ -120,6 +120,9 @@ UL_WARN_ADD([-Wstrict-prototypes])
 UL_WARN_ADD([-Wformat-security])
 AC_SUBST([WARN_CFLAGS])
 
+UL_WARN_ADD([-Wno-clobbered], BSD_WARN_CFLAGS)
+AC_SUBST([BSD_WARN_CFLAGS])
+
 dnl libtool-2
 LT_INIT
 
@@ -902,9 +905,7 @@ UL_BUILD_INIT([unshare])
 UL_REQUIRES_LINUX([unshare])
 UL_REQUIRES_SYSCALL_CHECK([unshare], [UL_CHECK_SYSCALL([unshare])])
 AM_CONDITIONAL(BUILD_UNSHARE, test "x$build_unshare" = xyes)
-if test "x$build_unshare" = xyes; then
-  AC_CHECK_FUNCS([unshare])
-fi
+AC_CHECK_FUNCS([unshare])
 
 AC_ARG_ENABLE([nsenter],
   AS_HELP_STRING([--disable-nsenter], [do not build nsenter]),
@@ -914,9 +915,7 @@ UL_BUILD_INIT([nsenter])
 UL_REQUIRES_LINUX([nsenter])
 UL_REQUIRES_SYSCALL_CHECK([nsenter], [UL_CHECK_SYSCALL([setns])], [setns])
 AM_CONDITIONAL(BUILD_NSENTER, test "x$build_nsenter" = xyes)
-if test "x$build_nsenter" = xyes; then
-  AC_CHECK_FUNCS([setns])
-fi
+AC_CHECK_FUNCS([setns])
 
 dnl setpriv depends on libcap-ng.  It would be possible to build
 dnl a version of setpriv with limited functionality without libcap-ng,
@@ -1305,7 +1304,7 @@ AM_CONDITIONAL(BUILD_SETTERM, test "x$build_setterm" = xyes)
 
 
 AC_ARG_ENABLE([schedutils],
-  AS_HELP_STRING([--disable-schedutils], [do not build chrt, ionice, teskset]),
+  AS_HELP_STRING([--disable-schedutils], [do not build chrt, ionice, taskset]),
   [], enable_schedutils=yes
 )
 UL_BUILD_INIT([schedutils])

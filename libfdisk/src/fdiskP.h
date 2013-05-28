@@ -225,14 +225,12 @@ struct fdisk_ask {
 			uint64_t	result;
 			uint64_t	base;		/* for relative results */
 			uint64_t	unit;		/* unit for offsets */
-			char		*range;		/* by library generated list */
+			const char	*range;		/* by library generated list */
 			unsigned int	relative:1;
 		} num;
 		/* FDISK_ASKTYPE_{WARN,WARNX,..} */
 		struct ask_print {
 			const char	*mesg;
-			va_list		va;
-			unsigned int	has_va:1;
 			int		errnum;		/* errno */
 		} print;
 		/* FDISK_ASKTYPE_YESNO */
