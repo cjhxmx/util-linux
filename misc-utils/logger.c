@@ -64,6 +64,30 @@ enum {
 	ALL_TYPES = TYPE_UDP | TYPE_TCP
 };
 
+enum {
+	OPT_PRIO_PREFIX = CHAR_MAX + 1
+};
+
+
+static char* get_prio_prefix(char *msg, int *prio)
+{
+	int p;
+	char *end = NULL;
+	int facility = *prio & LOG_FACMASK;
+
+	errno = 0;
+	p = strtoul(msg + 1, &end, 10);
+
+	if (errno || !end || end == msg + 1 || end[0] != '>')
+		return msg;
+
+	if (p & LOG_FACMASK)
+		facility = p & LOG_FACMASK;
+
+	*prio = facility | (p & LOG_PRIMASK);
+	return end + 1;
+}
+
 static int decode(char *name, CODE *codetab)
 {
 	register CODE *c;
@@ -101,8 +125,7 @@ static int pencode(char *s)
 	return ((lev & LOG_PRIMASK) | (fac & LOG_FACMASK));
 }
 
-static int
-unix_socket(const char *path, const int socket_type)
+static int unix_socket(const char *path, const int socket_type)
 {
 	int fd, i;
 	static struct sockaddr_un s_addr;	/* AF_UNIX address of local logger */
@@ -135,8 +158,8 @@ unix_socket(const char *path, const int socket_type)
 	return fd;
 }
 
-static int
-inet_socket(const char *servername, const char *port, const int socket_type)
+static int inet_socket(const char *servername, const char *port,
+		       const int socket_type)
 {
 	int fd, errcode, i;
 	struct addrinfo hints, *res;
@@ -181,8 +204,8 @@ inet_socket(const char *servername, const char *port, const int socket_type)
 	return fd;
 }
 
-static void
-mysyslog(int fd, int logflags, int pri, char *tag, char *msg) {
+static void mysyslog(int fd, int logflags, int pri, char *tag, char *msg)
+{
        char buf[1000], pid[30], *cp, *tp;
        time_t now;
 
@@ -211,23 +234,26 @@ mysyslog(int fd, int logflags, int pri, char *tag, char *msg) {
 
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
-	fputs(_("\nUsage:\n"), out);
-	fprintf(out,
-	      _(" %s [options] [message]\n"), program_invocation_short_name);
+	fputs(USAGE_HEADER, out);
+	fprintf(out, _(" %s [options] [message]\n"), program_invocation_short_name);
 
-	fputs(_("\nOptions:\n"), out);
+	fputs(USAGE_OPTIONS, out);
 	fputs(_(" -T, --tcp             use TCP only\n"), out);
-	fputs(_(" -d, --udp             use UDP only\n"
-		" -i, --id              log the process ID too\n"
-		" -f, --file <file>     log the contents of this file\n"
-		" -h, --help            display this help text and exit\n"), out);
-	fputs(_(" -n, --server <name>   write to this remote syslog server\n"
-		" -P, --port <number>   use this UDP port\n"
-		" -p, --priority <prio> mark given message with this priority\n"
-		" -s, --stderr          output message to standard error as well\n"), out);
-	fputs(_(" -t, --tag <tag>       mark every line with this tag\n"
-		" -u, --socket <socket> write to this Unix socket\n"
-		" -V, --version         output version information and exit\n\n"), out);
+	fputs(_(" -d, --udp             use UDP only\n"), out);
+	fputs(_(" -i, --id              log the process ID too\n"), out);
+	fputs(_(" -f, --file <file>     log the contents of this file\n"), out);
+	fputs(_(" -n, --server <name>   write to this remote syslog server\n"), out);
+	fputs(_(" -P, --port <number>   use this UDP port\n"), out);
+	fputs(_(" -p, --priority <prio> mark given message with this priority\n"), out);
+	fputs(_("     --prio-prefix     look for a prefix on every line read from stdin\n"), out);
+	fputs(_(" -s, --stderr          output message to standard error as well\n"), out);
+	fputs(_(" -t, --tag <tag>       mark every line with this tag\n"), out);
+	fputs(_(" -u, --socket <socket> write to this Unix socket\n"), out);
+
+	fputs(USAGE_SEPARATOR, out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
+	fprintf(out, USAGE_MAN_TAIL("logger(1)"));
 
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -238,9 +264,9 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
  *	Reads from an input and arranges to write the result on the system
  *	log.
  */
-int
-main(int argc, char **argv) {
-	int ch, logflags, pri;
+int main(int argc, char **argv)
+{
+	int ch, logflags, pri, prio_prefix;
 	char *tag, buf[1024];
 	char *usock = NULL;
 	char *server = NULL;
@@ -260,6 +286,7 @@ main(int argc, char **argv) {
 		{ "port",	required_argument,  0, 'P' },
 		{ "version",	no_argument,	    0, 'V' },
 		{ "help",	no_argument,	    0, 'h' },
+		{ "prio-prefix", no_argument, 0, OPT_PRIO_PREFIX },
 		{ NULL,		0, 0, 0 }
 	};
 
@@ -271,9 +298,10 @@ main(int argc, char **argv) {
 	tag = NULL;
 	pri = LOG_NOTICE;
 	logflags = 0;
+	prio_prefix = 0;
 	while ((ch = getopt_long(argc, argv, "f:ip:st:u:dTn:P:Vh",
 					    longopts, NULL)) != -1) {
-		switch((char)ch) {
+		switch (ch) {
 		case 'f':		/* file to log */
 			if (freopen(optarg, "r", stdin) == NULL)
 				err(EXIT_FAILURE, _("file %s"),
@@ -311,6 +339,9 @@ main(int argc, char **argv) {
 			exit(EXIT_SUCCESS);
 		case 'h':
 			usage(stdout);
+		case OPT_PRIO_PREFIX:
+			prio_prefix = 1;
+			break;
 		case '?':
 		default:
 			usage(stderr);
@@ -360,6 +391,8 @@ main(int argc, char **argv) {
 			mysyslog(LogSock, logflags, pri, tag, buf);
 		}
 	} else {
+		char *msg;
+		int default_priority = pri;
 		while (fgets(buf, sizeof(buf), stdin) != NULL) {
 		    /* glibc is buggy and adds an additional newline,
 		       so we have to remove it here until glibc is fixed */
@@ -368,10 +401,15 @@ main(int argc, char **argv) {
 		    if (len > 0 && buf[len - 1] == '\n')
 			    buf[len - 1] = '\0';
 
+			msg = buf;
+			pri = default_priority;
+			if (prio_prefix && msg[0] == '<')
+				msg = get_prio_prefix(msg, &pri);
+
 		    if (!usock && !server)
-			syslog(pri, "%s", buf);
+			syslog(pri, "%s", msg);
 		    else
-			mysyslog(LogSock, logflags, pri, tag, buf);
+			mysyslog(LogSock, logflags, pri, tag, msg);
 		}
 	}
 	if (!usock && !server)
