@@ -154,21 +154,18 @@ int main(int argc, char *argv[])
 				len = wcslen(buf);
 			}
 
-			t = buf + len - 1 - (*(buf+len-1)=='\r' || *(buf+len-1)=='\n');
-			for ( ; t >= buf; --t) {
-				if (*t != 0)
-					putwchar(*t);
-			}
-			putwchar('\n');
+			if (*(t = buf + len - 1) == '\n')
+				--t;
+			for ( ; buf <= t; --t)
+				putwchar(*t);
+			if (!feof(fp))
+				putwchar('\n');
 		}
-
-		fflush(fp);
 		if (ferror(fp)) {
 			warn("%s", filename);
 			rval = EXIT_FAILURE;
 		}
-		if (fclose(fp))
-			rval = EXIT_FAILURE;
+		fclose(fp);
 	} while(*argv);
 
 	free(buf);
