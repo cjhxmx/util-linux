@@ -1094,13 +1094,16 @@ static int loopcxt_check_size(struct loopdev_cxt *lc, int file_fd)
 	if (!lc->info.lo_offset && !lc->info.lo_sizelimit)
 		return 0;
 
-	if (fstat(file_fd, &st))
+	if (fstat(file_fd, &st)) {
+		DBG(lc, loopdev_debug("failed to fstat backing file"));
 		return -errno;
-
+	}
 	if (S_ISBLK(st.st_mode)) {
 		if (blkdev_get_size(file_fd,
-				(unsigned long long *) &expected_size))
+				(unsigned long long *) &expected_size)) {
+			DBG(lc, loopdev_debug("failed to determine device size"));
 			return -errno;
+		}
 	} else
 		expected_size = st.st_size;
 
@@ -1116,11 +1119,15 @@ static int loopcxt_check_size(struct loopdev_cxt *lc, int file_fd)
 		expected_size = lc->info.lo_sizelimit;
 
 	dev_fd = loopcxt_get_fd(lc);
-	if (dev_fd < 0)
+	if (dev_fd < 0) {
+		DBG(lc, loopdev_debug("failed to get loop FD"));
 		return -errno;
+	}
 
-	if (blkdev_get_size(dev_fd, (unsigned long long *) &size))
+	if (blkdev_get_size(dev_fd, (unsigned long long *) &size)) {
+		DBG(lc, loopdev_debug("failed to determine loopdev size"));
 		return -errno;
+	}
 
 	if (expected_size != size) {
 		DBG(lc, loopdev_debug("warning: loopdev and expected "
@@ -1137,8 +1144,13 @@ static int loopcxt_check_size(struct loopdev_cxt *lc, int file_fd)
 		if (blkdev_get_size(dev_fd, (unsigned long long *) &size))
 			return -errno;
 
-		if (expected_size != size)
-			return -ERANGE;
+		if (expected_size != size) {
+			errno = ERANGE;
+			DBG(lc, loopdev_debug("failed to set loopdev size, "
+					"size: %ju, expected: %ju",
+					size, expected_size));
+			return -errno;
+		}
 	}
 
 	return 0;
@@ -1234,7 +1246,6 @@ int loopcxt_setup_device(struct loopdev_cxt *lc)
 		goto err;
 
 	close(file_fd);
-	file_fd = -1;
 
 	memset(&lc->info, 0, sizeof(lc->info));
 	lc->has_info = 0;
@@ -1284,6 +1295,36 @@ int loopcxt_delete_device(struct loopdev_cxt *lc)
 
 	DBG(lc, loopdev_debug("device removed"));
 	return 0;
+}
+
+int loopcxt_add_device(struct loopdev_cxt *lc)
+{
+	int rc = -EINVAL;
+	int ctl, nr = -1;
+	const char *p, *dev = loopcxt_get_device(lc);
+
+	if (!dev)
+		goto done;
+
+	if (!(lc->flags & LOOPDEV_FL_CONTROL)) {
+		rc = -ENOSYS;
+		goto done;
+	}
+
+	p = strrchr(dev, '/');
+	if (!p || (sscanf(p, "/loop%d", &nr) != 1 && sscanf(p, "/%d", &nr) != 1)
+	       || nr < 0)
+		goto done;
+
+	ctl = open(_PATH_DEV_LOOPCTL, O_RDWR|O_CLOEXEC);
+	if (ctl >= 0) {
+		DBG(lc, loopdev_debug("add_device %d", nr));
+		rc = ioctl(ctl, LOOP_CTL_ADD, nr);
+		close(ctl);
+	}
+done:
+	DBG(lc, loopdev_debug("add_device done [rc=%d]", rc));
+	return rc;
 }
 
 /*

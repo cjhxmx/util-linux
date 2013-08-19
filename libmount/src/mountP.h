@@ -136,6 +136,9 @@ extern int startswith(const char *s, const char *sx)
 
 extern char *stripoff_last_component(char *path);
 
+extern int mnt_valid_tagname(const char *tagname);
+extern int append_string(char **a, const char *b);
+
 extern int is_file_empty(const char *name);
 
 extern int mkdir_p(const char *path, mode_t mode);
@@ -200,7 +203,7 @@ struct libmnt_iter {
 
 
 /*
- * This struct represents one entry in mtab/fstab/mountinfo file.
+ * This struct represents one entry in a mtab/fstab/mountinfo file.
  * (note that fstab[1] means the first column from fstab, and so on...)
  */
 struct libmnt_fs {
@@ -240,6 +243,8 @@ struct libmnt_fs {
 	int		flags;		/* MNT_FS_* flags */
 	pid_t		tid;		/* /proc/<tid>/mountinfo otherwise zero */
 
+	char		*comment;	/* fstab comment */
+
 	void		*userdata;	/* library independent data */
 };
 
@@ -262,6 +267,9 @@ struct libmnt_fs {
 struct libmnt_table {
 	int		fmt;		/* MNT_FMT_* file format */
 	int		nents;		/* number of valid entries */
+	int		comms;		/* enable/disable comment parsing */
+	char		*comm_intro;	/* First comment in file */
+	char		*comm_tail;	/* Last comment in file */
 
 	struct libmnt_cache *cache;		/* canonicalized paths/tags cache */
 
@@ -273,6 +281,7 @@ struct libmnt_table {
 
 
 	struct list_head	ents;	/* list of entries (libmnt_fs) */
+	void		*userdata;
 };
 
 extern struct libmnt_table *__mnt_new_table_from_file(const char *filename, int fmt);
@@ -383,7 +392,7 @@ struct libmnt_context
 #define MNT_FL_SAVED_USER	(1 << 23)
 #define MNT_FL_PREPARED		(1 << 24)
 #define MNT_FL_HELPER		(1 << 25)	/* [u]mount.<type> */
-#define MNT_FL_LOOPDEV_READY	(1 << 26)	/* /dev/loop<N> initialized by library */
+#define MNT_FL_LOOPDEV_READY	(1 << 26)	/* /dev/loop<N> initialized by the library */
 #define MNT_FL_MOUNTOPTS_FIXED  (1 << 27)
 
 /* default flags */

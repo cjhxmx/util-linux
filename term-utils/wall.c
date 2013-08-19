@@ -73,14 +73,15 @@
 #define WRITE_TIME_OUT	300		/* in seconds */
 
 /* Function prototypes */
-char *makemsg(char *fname, size_t *mbufsize, int print_banner);
-static void usage(FILE *out);
+static char *makemsg(char *fname, char **mvec, int mvecsz,
+		    size_t *mbufsize, int print_banner);
 
 static void __attribute__((__noreturn__)) usage(FILE *out)
 {
 	fputs(_("\nUsage:\n"), out);
 	fprintf(out,
-		_(" %s [options] [<file>]\n"),program_invocation_short_name);
+		_(" %s [options] [<file> | <message>]\n"),
+		program_invocation_short_name);
 
 	fputs(_("\nOptions:\n"), out);
 	fputs(_(" -n, --nobanner          do not print banner, works only for root\n"
@@ -91,17 +92,19 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
-int
-main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
 	int ch;
 	struct iovec iov;
 	struct utmp *utmpptr;
 	char *p;
 	char line[sizeof(utmpptr->ut_line) + 1];
 	int print_banner = TRUE;
-	char *mbuf;
+	char *mbuf, *fname = NULL;
 	size_t mbufsize;
 	unsigned timeout = WRITE_TIME_OUT;
+	char **mvec = NULL;
+	int mvecsz = 0;
 
 	static const struct option longopts[] = {
 		{ "nobanner",	no_argument,		0, 'n' },
@@ -141,10 +144,15 @@ main(int argc, char **argv) {
 	}
 	argc -= optind;
 	argv += optind;
-	if (argc > 1)
-		usage(stderr);
 
-	mbuf = makemsg(*argv, &mbufsize, print_banner);
+	if (argc == 1 && access(argv[0], F_OK) == 0)
+		fname = argv[0];
+	else if (argc >= 1) {
+		mvec = argv;
+		mvecsz = argc;
+	}
+
+	mbuf = makemsg(fname, mvec, mvecsz, &mbufsize, print_banner);
 
 	iov.iov_base = mbuf;
 	iov.iov_len = mbufsize;
@@ -157,7 +165,6 @@ main(int argc, char **argv) {
 		if (utmpptr->ut_type != USER_PROCESS)
 			continue;
 #endif
-
 		/* Joey Hess reports that use-sessreg in /etc/X11/wdm/
 		   produces ut_line entries like :0, and a write
 		   to /dev/:0 fails. */
@@ -173,16 +180,13 @@ main(int argc, char **argv) {
 	exit(EXIT_SUCCESS);
 }
 
-char *
-makemsg(char *fname, size_t *mbufsize, int print_banner)
+static char *makemsg(char *fname, char **mvec, int mvecsz,
+		     size_t *mbufsize, int print_banner)
 {
 	register int ch, cnt;
-	struct tm *lt;
-	struct passwd *pw;
 	struct stat sbuf;
-	time_t now;
 	FILE *fp;
-	char *p, *whom, *where, *lbuf, *tmpname, *mbuf;
+	char *p, *lbuf, *tmpname, *mbuf;
 	long line_max;
 
 	line_max = sysconf(_SC_LINE_MAX);
@@ -195,6 +199,10 @@ makemsg(char *fname, size_t *mbufsize, int print_banner)
 
 	if (print_banner == TRUE) {
 		char *hostname = xgethostname();
+		char *whom, *where, *date;
+		struct passwd *pw;
+		time_t now;
+
 		if (!(whom = getlogin()) || !*whom)
 			whom = (pw = getpwuid(getuid())) ? pw->pw_name : "???";
 		if (!whom) {
@@ -205,9 +213,12 @@ makemsg(char *fname, size_t *mbufsize, int print_banner)
 		if (!where) {
 			where = "somewhere";
 			warn(_("cannot get tty name"));
-		}
+		} else if (strncmp(where, "/dev/", 5) == 0)
+			where += 5;
+
 		time(&now);
-		lt = localtime(&now);
+		date = xstrdup(ctime(&now));
+		date[strlen(date) - 1] = '\0';
 
 		/*
 		 * all this stuff is to blank out a square for the message;
@@ -219,44 +230,64 @@ makemsg(char *fname, size_t *mbufsize, int print_banner)
 		/* snprintf is not always available, but the sprintf's here
 		   will not overflow as long as %d takes at most 100 chars */
 		fprintf(fp, "\r%79s\r\n", " ");
-		sprintf(lbuf, _("Broadcast Message from %s@%s"),
-			      whom, hostname);
-		free(hostname);
+		sprintf(lbuf, _("Broadcast message from %s@%s (%s) (%s):"),
+			      whom, hostname, where, date);
 		fprintf(fp, "%-79.79s\007\007\r\n", lbuf);
-		sprintf(lbuf, "        (%s) at %d:%02d ...",
-			      where, lt->tm_hour, lt->tm_min);
-		fprintf(fp, "%-79.79s\r\n", lbuf);
+		free(hostname);
+		free(date);
 	}
 	fprintf(fp, "%79s\r\n", " ");
 
-
-	if (fname) {
+	 if (mvec) {
 		/*
-		 * When we are not root, but suid or sgid, refuse to read files
-		 * (e.g. device files) that the user may not have access to.
-		 * After all, our invoker can easily do "wall < file"
-		 * instead of "wall file".
+		 * Read message from argv[]
 		 */
-		uid_t uid = getuid();
-		if (uid && (uid != geteuid() || getgid() != getegid()))
-			errx(EXIT_FAILURE, _("will not read %s - use stdin."),
-			     fname);
+		int i;
 
-		if (!freopen(fname, "r", stdin))
-			err(EXIT_FAILURE, _("cannot open %s"), fname);
-	}
+		for (i = 0; i < mvecsz; i++) {
+			fputs(mvec[i], fp);
+			if (i < mvecsz - 1)
+				fputc(' ', fp);
+		}
+		fputc('\r', fp);
+		fputc('\n', fp);
 
-	while (fgets(lbuf, line_max, stdin)) {
-		for (cnt = 0, p = lbuf; (ch = *p) != '\0'; ++p, ++cnt) {
-			if (cnt == 79 || ch == '\n') {
-				for (; cnt < 79; ++cnt)
-					putc(' ', fp);
-				putc('\r', fp);
-				putc('\n', fp);
-				cnt = 0;
+	} else {
+		/*
+		 * read message from <file>
+		 */
+		if (fname) {
+			/*
+			 * When we are not root, but suid or sgid, refuse to read files
+			 * (e.g. device files) that the user may not have access to.
+			 * After all, our invoker can easily do "wall < file"
+			 * instead of "wall file".
+			 */
+			uid_t uid = getuid();
+			if (uid && (uid != geteuid() || getgid() != getegid()))
+				errx(EXIT_FAILURE, _("will not read %s - use stdin."),
+				     fname);
+
+			if (!freopen(fname, "r", stdin))
+				err(EXIT_FAILURE, _("cannot open %s"), fname);
+
+		}
+
+		/*
+		 * Read message from stdin.
+		 */
+		while (fgets(lbuf, line_max, stdin)) {
+			for (cnt = 0, p = lbuf; (ch = *p) != '\0'; ++p, ++cnt) {
+				if (cnt == 79 || ch == '\n') {
+					for (; cnt < 79; ++cnt)
+						putc(' ', fp);
+					putc('\r', fp);
+					putc('\n', fp);
+					cnt = 0;
+				}
+				if (ch != '\n')
+					carefulputc(ch, fp);
 			}
-			if (ch != '\n')
-				carefulputc(ch, fp);
 		}
 	}
 	fprintf(fp, "%79s\r\n", " ");

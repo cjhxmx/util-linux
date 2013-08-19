@@ -160,6 +160,7 @@ static int show_all_loops(struct loopdev_cxt *lc, const char *file,
 			  uint64_t offset, int flags)
 {
 	struct stat sbuf, *st = &sbuf;
+	char *cn_file = NULL;
 
 	if (loopcxt_init_iterator(lc, LOOPITER_FL_USED))
 		return -1;
@@ -168,18 +169,23 @@ static int show_all_loops(struct loopdev_cxt *lc, const char *file,
 		st = NULL;
 
 	while (loopcxt_next(lc) == 0) {
-		if (file && !loopcxt_is_used(lc, st, file, offset, flags)) {
-			char *canonized;
-			int ret;
-			canonized = canonicalize_path(file);
-			ret = loopcxt_is_used(lc, st, canonized, offset, flags);
-			free(canonized);
-			if (!ret)
+		if (file) {
+			int used;
+			const char *bf = cn_file ? cn_file : file;
+
+			used = loopcxt_is_used(lc, st, bf, offset, flags);
+			if (!used && !cn_file) {
+				bf = cn_file = canonicalize_path(file);
+				used = loopcxt_is_used(lc, st, bf, offset, flags);
+			}
+			if (!used)
 				continue;
 		}
 		printf_loopdev(lc);
 	}
 	loopcxt_deinit_iterator(lc);
+	if (cn_file)
+		free(cn_file);
 	return 0;
 }
 
@@ -298,6 +304,7 @@ static int make_table(struct loopdev_cxt *lc,
 {
 	struct stat sbuf, *st = &sbuf;
 	struct tt_line *ln;
+	char *cn_file = NULL;
 	int i;
 
 	if (!(tt = tt_new_table(tt_flags)))
@@ -325,9 +332,18 @@ static int make_table(struct loopdev_cxt *lc,
 		st = NULL;
 
 	while (loopcxt_next(lc) == 0) {
-		if (file && !loopcxt_is_used(lc, st, file, offset, flags))
-			continue;
+		if (file) {
+			int used;
+			const char *bf = cn_file ? cn_file : file;
 
+			used = loopcxt_is_used(lc, st, bf, offset, flags);
+			if (!used && !cn_file) {
+				bf = cn_file = canonicalize_path(file);
+				used = loopcxt_is_used(lc, st, bf, offset, flags);
+			}
+			if (!used)
+				continue;
+		}
 
 		ln = tt_add_line(tt, NULL);
 		if (set_tt_data(lc, ln))
@@ -335,6 +351,8 @@ static int make_table(struct loopdev_cxt *lc,
 	}
 
 	loopcxt_deinit_iterator(lc);
+	if (cn_file)
+		free(cn_file);
 	return 0;
 }
 
@@ -471,7 +489,8 @@ int main(int argc, char **argv)
 			break;
 		case 'c':
 			act = A_SET_CAPACITY;
-			if (loopcxt_set_device(&lc, optarg))
+			if (!is_loopdev(optarg) ||
+			    loopcxt_set_device(&lc, optarg))
 				err(EXIT_FAILURE, _("%s: failed to use device"),
 						optarg);
 			break;
@@ -480,7 +499,8 @@ int main(int argc, char **argv)
 			break;
 		case 'd':
 			act = A_DELETE;
-			if (loopcxt_set_device(&lc, optarg))
+			if (!is_loopdev(optarg) ||
+			    loopcxt_set_device(&lc, optarg))
 				err(EXIT_FAILURE, _("%s: failed to use device"),
 						optarg);
 			break;
@@ -577,7 +597,8 @@ int main(int argc, char **argv)
 		 * losetup [--list] <device>
 		 */
 		act = A_SHOW_ONE;
-		if (loopcxt_set_device(&lc, argv[optind]))
+		if (!is_loopdev(argv[optind]) ||
+		    loopcxt_set_device(&lc, argv[optind]))
 			err(EXIT_FAILURE, _("%s: failed to use device"),
 					argv[optind]);
 		optind++;
@@ -590,6 +611,7 @@ int main(int argc, char **argv)
 
 		if (optind >= argc)
 			errx(EXIT_FAILURE, _("no loop device specified"));
+		/* don't use is_loopdev() here, the device does not have exist yet */
 		if (loopcxt_set_device(&lc, argv[optind]))
 			err(EXIT_FAILURE, _("%s: failed to use device"),
 					argv[optind]);
@@ -619,7 +641,11 @@ int main(int argc, char **argv)
 	{
 		int hasdev = loopcxt_has_device(&lc);
 
+		if (hasdev && !is_loopdev(loopcxt_get_device(&lc)))
+			loopcxt_add_device(&lc);
 		do {
+			const char *errpre;
+
 			/* Note that loopcxt_{find_unused,set_device}() resets
 			 * loopcxt struct.
 			 */
@@ -641,12 +667,18 @@ int main(int argc, char **argv)
 			res = loopcxt_setup_device(&lc);
 			if (res == 0)
 				break;			/* success */
-			if (errno != EBUSY) {
-				warn(_("%s: failed to set up loop device"),
-					hasdev && loopcxt_get_fd(&lc) < 0 ?
-					    loopcxt_get_device(&lc) : file);
-				break;
-			}
+			if (errno == EBUSY)
+				continue;
+
+			/* errors */
+			errpre = hasdev && loopcxt_get_fd(&lc) < 0 ?
+					 loopcxt_get_device(&lc) : file;
+			if (errno == ERANGE && offset && offset % 512)
+				warnx(_("%s: failed to set up loop device, "
+					"offset is not 512-byte aligned."), errpre);
+			else
+				warn(_("%s: failed to set up loop device"), errpre);
+			break;
 		} while (hasdev == 0);
 
 		if (res == 0) {
@@ -659,7 +691,8 @@ int main(int argc, char **argv)
 	case A_DELETE:
 		res = delete_loop(&lc);
 		while (optind < argc) {
-			if (loopcxt_set_device(&lc, argv[optind]))
+			if (!is_loopdev(argv[optind]) ||
+			    loopcxt_set_device(&lc, argv[optind]))
 				warn(_("%s: failed to use device"),
 						argv[optind]);
 			optind++;

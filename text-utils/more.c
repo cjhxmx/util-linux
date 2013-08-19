@@ -780,10 +780,11 @@ void __attribute__((__noreturn__)) end_it(int dummy __attribute__((__unused__)))
 
 void copy_file(register FILE *f)
 {
-	register int c;
+	char buf[BUFSIZ];
+	size_t sz;
 
-	while ((c = getc(f)) != EOF)
-		putchar(c);
+	while ((sz = fread(&buf, sizeof(char), sizeof(buf), f)) > 0)
+		fwrite(&buf, sizeof(char), sz, stdout);
 }
 
 #define ringbell()	putcerr('\007')
@@ -835,7 +836,8 @@ void prepare_line_buffer(void)
 	if (nsz < LINSIZ)
 		nsz = LINSIZ;
 
-	nline = xrealloc(Line, nsz);
+	/* alloc nsz and extra space for \n\0 */
+	nline = xrealloc(Line, nsz + 2);
 	Line = nline;
 	LineLen = nsz;
 }
@@ -911,7 +913,8 @@ int get_line(register FILE *f, int *length)
 					Fseek(f, file_pos_bak);
 					break_flag = 1;
 				} else {
-					for (i = 0; i < mbc_pos; i++)
+					for (i = 0; p < &Line[LineLen - 1] &&
+						    i < mbc_pos; i++)
 						*p++ = mbc[i];
 					if (wc_width > 0)
 						column += wc_width;
@@ -1028,6 +1031,12 @@ int get_line(register FILE *f, int *length)
 
 		if (column >= Mcol && fold_opt)
 			break;
+#ifdef HAVE_WIDECHAR
+		if (use_mbc_buffer_flag == 0 && p >= &Line[LineLen - 1 - 4])
+			/* don't read another char if there is no space for
+			 * whole multibyte sequence */
+			break;
+#endif
 		c = Getc(f);
 	}
 	if (column >= Mcol && Mcol > 0) {
@@ -1058,8 +1067,7 @@ void erasep(register int col)
 		if (!dumb && eraseln)
 			my_putstring(eraseln);
 		else
-			for (col = promptlen - col; col > 0; col--)
-				putchar(' ');
+			printf("%*s", promptlen - col, "");
 	}
 	promptlen = 0;
 }
@@ -1580,7 +1588,7 @@ void search(char buf[], FILE *file, register int n)
 	long startline = Ftell(file);
 	register long line1 = startline;
 	register long line2 = startline;
-	register long line3 = startline;
+	register long line3;
 	register int lncount;
 	int saveln, rc;
 	regex_t re;

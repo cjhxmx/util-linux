@@ -368,17 +368,24 @@ static char *get_tag_from_udev(const char *devname, int col)
 {
 	struct udev_device *dev;
 	const char *data = NULL;
-	char *res = NULL;
+	char *res = NULL, *path;
 
 	if (!udev)
 		udev = udev_new();
 	if (!udev)
 		return NULL;
 
+	/* libudev don't like /dev/mapper/ symlinks */
+	path = realpath(devname, NULL);
+	if (path)
+		devname = path;
+
 	if (strncmp(devname, "/dev/", 5) == 0)
 		devname += 5;
 
 	dev = udev_device_new_from_subsystem_sysname(udev, "block", devname);
+	free(path);
+
 	if (!dev)
 		return NULL;
 
@@ -410,7 +417,11 @@ static char *get_tag_from_udev(const char *devname, int col)
 #endif /* HAVE_LIBUDEV */
 
 /* Returns LABEL or UUID */
-static const char *get_tag(struct libmnt_fs *fs, const char *tagname, int col)
+static const char *get_tag(struct libmnt_fs *fs, const char *tagname, int col
+#ifndef HAVE_LIBUDEV
+		__attribute__((__unused__))
+#endif
+		)
 {
 	const char *t, *v, *res = NULL;
 
@@ -831,14 +842,6 @@ static int match_func(struct libmnt_fs *fs,
 	const char *m;
 	void *md;
 
-	m = get_match(COL_TARGET);
-	if (m && !mnt_fs_match_target(fs, m, cache))
-		return rc;
-
-	m = get_match(COL_SOURCE);
-	if (m && !mnt_fs_match_source(fs, m, cache))
-		return rc;
-
 	m = get_match(COL_FSTYPE);
 	if (m && !mnt_fs_match_fstype(fs, m))
 		return rc;
@@ -849,6 +852,14 @@ static int match_func(struct libmnt_fs *fs,
 
 	md = get_match_data(COL_MAJMIN);
 	if (md && mnt_fs_get_devno(fs) != *((dev_t *) md))
+		return rc;
+
+	m = get_match(COL_TARGET);
+	if (m && !mnt_fs_match_target(fs, m, cache))
+		return rc;
+
+	m = get_match(COL_SOURCE);
+	if (m && !mnt_fs_match_source(fs, m, cache))
 		return rc;
 
 	if ((flags & FL_DF) && !(flags & FL_ALL)) {

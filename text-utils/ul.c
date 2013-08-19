@@ -447,8 +447,7 @@ static void overstrike(void)
 	putwchar('\r');
 	for (*cp = ' '; *cp == ' '; cp--)
 		*cp = 0;
-	for (cp = lbuf; *cp; cp++)
-		putwchar(*cp);
+	fputws(lbuf, stdout);
 	if (hadbold) {
 		putwchar('\r');
 		for (cp = lbuf; *cp; cp++)
@@ -463,11 +462,11 @@ static void iattr(void)
 {
 	register int i;
 #ifdef __GNUC__
-	register char *lbuf = __builtin_alloca((maxcol+1)*sizeof(char));
+	register wchar_t *lbuf = __builtin_alloca((maxcol+1)*sizeof(wchar_t));
 #else
-	char lbuf[BUFSIZ];
+	wchar_t lbuf[BUFSIZ];
 #endif
-	register char *cp = lbuf;
+	register wchar_t *cp = lbuf;
 
 	for (i = 0; i < maxcol; i++)
 		switch (obuf[i].c_mode) {
@@ -481,8 +480,7 @@ static void iattr(void)
 		}
 	for (*cp = ' '; *cp == ' '; cp--)
 		*cp = 0;
-	for (cp = lbuf; *cp; cp++)
-		putwchar(*cp);
+	fputws(lbuf, stdout);
 	putwchar('\n');
 }
 
@@ -491,11 +489,11 @@ static void initbuf(void)
 	if (obuf == NULL) {
 		/* First time. */
 		obuflen = BUFSIZ;
-		obuf = xmalloc(sizeof(struct CHAR) * obuflen);
-	}
+		obuf = xcalloc(obuflen, sizeof(struct CHAR));
+	} else
+		/* assumes NORMAL == 0 */
+		memset(obuf, 0, sizeof(struct CHAR) * maxcol);
 
-	/* assumes NORMAL == 0 */
-	memset(obuf, 0, sizeof(struct CHAR) * obuflen);
 	setcol(0);
 	maxcol = 0;
 	mode &= ALTSET;

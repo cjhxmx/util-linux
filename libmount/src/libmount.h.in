@@ -41,7 +41,7 @@ struct libmnt_cache;
 /**
  * libmnt_lock:
  *
- * Stores information about locked file (e.g. /etc/mtab)
+ * Stores information about the locked file (e.g. /etc/mtab)
  */
 struct libmnt_lock;
 
@@ -369,6 +369,10 @@ extern off_t mnt_fs_get_size(struct libmnt_fs *fs);
 extern off_t mnt_fs_get_usedsize(struct libmnt_fs *fs);
 extern int mnt_fs_get_priority(struct libmnt_fs *fs);
 
+extern const char *mnt_fs_get_comment(struct libmnt_fs *fs);
+extern int mnt_fs_set_comment(struct libmnt_fs *fs, const char *comm);
+extern int mnt_fs_append_comment(struct libmnt_fs *fs, const char *comm);
+
 extern int mnt_fs_match_target(struct libmnt_fs *fs, const char *target,
 			       struct libmnt_cache *cache);
 extern int mnt_fs_match_source(struct libmnt_fs *fs, const char *source,
@@ -408,6 +412,15 @@ extern void mnt_free_table(struct libmnt_table *tb);
 
 extern int mnt_reset_table(struct libmnt_table *tb);
 extern int mnt_table_get_nents(struct libmnt_table *tb);
+
+extern void mnt_table_enable_comments(struct libmnt_table *tb, int enable);
+extern const char *mnt_table_get_intro_comment(struct libmnt_table *tb);
+extern int mnt_table_set_intro_comment(struct libmnt_table *tb, const char *comm);
+extern int mnt_table_append_intro_comment(struct libmnt_table *tb, const char *comm);
+extern int mnt_table_set_trailing_comment(struct libmnt_table *tb, const char *comm);
+extern const char *mnt_table_get_trailing_comment(struct libmnt_table *tb);
+extern int mnt_table_append_trailing_comment(struct libmnt_table *tb, const char *comm);
+
 extern int mnt_table_set_cache(struct libmnt_table *tb, struct libmnt_cache *mpc);
 extern struct libmnt_cache *mnt_table_get_cache(struct libmnt_table *tb);
 extern int mnt_table_add_fs(struct libmnt_table *tb, struct libmnt_fs *fs);
@@ -448,6 +461,9 @@ extern int mnt_table_is_fs_mounted(struct libmnt_table *tb, struct libmnt_fs *fs
 extern struct libmnt_update *mnt_new_update(void)
 			__ul_attribute__((warn_unused_result));
 extern void mnt_free_update(struct libmnt_update *upd);
+
+extern int mnt_table_replace_file(struct libmnt_table *tb, const char *filename);
+extern int mnt_table_write_file(struct libmnt_table *tb, FILE *file);
 
 extern int mnt_update_is_ready(struct libmnt_update *upd);
 extern int mnt_update_set_fs(struct libmnt_update *upd, unsigned long mountflags,
@@ -715,10 +731,10 @@ extern int mnt_context_set_syscall_status(struct libmnt_context *cxt, int status
 #define MS_NODIRATIME   0x800	/* 2048: Don't update directory access times */
 #endif
 #ifndef MS_BIND
-#define	MS_BIND		0x1000	/* 4096: Mount existing tree also elsewhere */
+#define	MS_BIND		0x1000	/* 4096: Mount existing tree elsewhere as well */
 #endif
 #ifndef MS_MOVE
-#define MS_MOVE		0x2000	/* 8192: Atomically move tree */
+#define MS_MOVE		0x2000	/* 8192: Atomically move the tree */
 #endif
 #ifndef MS_REC
 #define MS_REC		0x4000	/* 16384: Recursive loopback */

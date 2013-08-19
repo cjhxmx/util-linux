@@ -491,9 +491,11 @@ static char *replace_u(char *str, char *username)
 		}
 		sz = strlen(str);
 
-		if (p == str && sz == 2)
+		if (p == str && sz == 2) {
 			/* 'str' contains only '\u' */
+			free(old);
 			return username;
+		}
 
 		tp = entry = malloc(sz + usz);
 		if (!tp)
@@ -605,7 +607,7 @@ static void parse_args(int argc, char **argv, struct options *op)
 	};
 
 	while ((c = getopt_long(argc, argv,
-			   "8a:cC:d:Ef:hH:iI:Jl:LmnNo:pP:r:Rst:Uw", longopts,
+			   "8a:cC:d:Ef:hH:iI:Jl:L::mnNo:pP:r:Rst:Uw", longopts,
 			    NULL)) != -1) {
 		switch (c) {
 		case '8':
@@ -2007,7 +2009,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	fputs(_(" -m, --extract-baud         extract baud rate during connect\n"), out);
 	fputs(_(" -n, --skip-login           do not prompt for login\n"), out);
 	fputs(_(" -o, --login-options <opts> options that are passed to login\n"), out);
-	fputs(_(" -p, --loginpause           wait for any key before the login\n"), out);
+	fputs(_(" -p, --login-pause          wait for any key before the login\n"), out);
 	fputs(_(" -r, --chroot <dir>         change root to the directory\n"), out);
 	fputs(_(" -R, --hangup               do virtually hangup on the tty\n"), out);
 	fputs(_(" -s, --keep-baud            try to keep baud rate after break\n"), out);
@@ -2017,7 +2019,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	fputs(_("     --noclear              do not clear the screen before prompt\n"), out);
 	fputs(_("     --nohints              do not print hints\n"), out);
 	fputs(_("     --nonewline            do not print a newline before issue\n"), out);
-	fputs(_("     --no-hostname          no hostname at all will be shown\n"), out);
+	fputs(_("     --nohostname           no hostname at all will be shown\n"), out);
 	fputs(_("     --long-hostname        show full qualified hostname\n"), out);
 	fputs(_("     --erase-chars <string> additional backspace chars\n"), out);
 	fputs(_("     --kill-chars <string>  additional kill chars\n"), out);
