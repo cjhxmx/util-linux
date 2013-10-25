@@ -66,7 +66,7 @@ struct libmnt_table *mnt_new_table(void)
 		return NULL;
 
 	DBG(TAB, mnt_debug_h(tb, "alloc"));
-
+	tb->refcount = 1;
 	INIT_LIST_HEAD(&tb->ents);
 	return tb;
 }
@@ -75,7 +75,8 @@ struct libmnt_table *mnt_new_table(void)
  * mnt_reset_table:
  * @tb: tab pointer
  *
- * Deallocates all entries (filesystems) from the table.
+ * Removes all entries (filesystems) from the table. The filesystems with zero
+ * reference count will be deallocated.
  *
  * Returns: 0 on success or negative number in case of error.
  */
@@ -89,7 +90,7 @@ int mnt_reset_table(struct libmnt_table *tb)
 	while (!list_empty(&tb->ents)) {
 		struct libmnt_fs *fs = list_entry(tb->ents.next,
 				                  struct libmnt_fs, ents);
-		mnt_free_fs(fs);
+		mnt_table_remove_fs(tb, fs);
 	}
 
 	tb->nents = 0;
@@ -97,10 +98,46 @@ int mnt_reset_table(struct libmnt_table *tb)
 }
 
 /**
+ * mnt_ref_table:
+ * @tb: table pointer
+ *
+ * Increments reference counter.
+ */
+void mnt_ref_table(struct libmnt_table *tb)
+{
+	if (tb) {
+		tb->refcount++;
+		/*DBG(FS, mnt_debug_h(tb, "ref=%d", tb->refcount));*/
+	}
+}
+
+/**
+ * mnt_unref_table:
+ * @tb: table pointer
+ *
+ * De-increments reference counter, on zero the @tb is automatically
+ * deallocated by mnt_free_table().
+ */
+void mnt_unref_table(struct libmnt_table *tb)
+{
+	if (tb) {
+		tb->refcount--;
+		/*DBG(FS, mnt_debug_h(tb, "unref=%d", tb->refcount));*/
+		if (tb->refcount <= 0)
+			mnt_free_table(tb);
+	}
+}
+
+
+/**
  * mnt_free_table:
  * @tb: tab pointer
  *
- * Deallocates tab struct and all entries.
+ * Deallocates the table. This function does not care about reference count. Don't
+ * use this function directly -- it's better to use use mnt_unref_table().
+ *
+ * The table entries (filesystems) are unrefrenced by mnt_reset_table() and
+ * cache by mnt_unref_cache().
  */
 void mnt_free_table(struct libmnt_table *tb)
 {
@@ -109,7 +146,10 @@ void mnt_free_table(struct libmnt_table *tb)
 
 	mnt_reset_table(tb);
 
+	WARN_REFCOUNT(TAB, tb, tb->refcount);
 	DBG(TAB, mnt_debug_h(tb, "free"));
+
+	mnt_unref_cache(tb->cache);
 	free(tb->comm_intro);
 	free(tb->comm_tail);
 	free(tb);
@@ -119,12 +159,54 @@ void mnt_free_table(struct libmnt_table *tb)
  * mnt_table_get_nents:
  * @tb: pointer to tab
  *
- * Returns: number of valid entries in tab.
+ * Returns: number of entries in table.
  */
 int mnt_table_get_nents(struct libmnt_table *tb)
 {
-	assert(tb);
 	return tb ? tb->nents : 0;
+}
+
+/**
+ * mnt_table_is_empty:
+ * @tb: pointer to tab
+ *
+ * Returns: 1 if the table is without filesystems, or 0.
+ */
+int mnt_table_is_empty(struct libmnt_table *tb)
+{
+	assert(tb);
+	return tb == NULL || list_empty(&tb->ents) ? 1 : 0;
+}
+
+/**
+ * mnt_table_set_userdata:
+ * @tb: pointer to tab
+ * @data: pointer to user data
+ *
+ * Sets pointer to the private user data.
+ *
+ * Returns: 0 on success or negative number in case of error.
+ */
+int mnt_table_set_userdata(struct libmnt_table *tb, void *data)
+{
+	assert(tb);
+	if (!tb)
+		return -EINVAL;
+
+	tb->userdata = data;
+	return 0;
+}
+
+/**
+ * mnt_table_get_userdata:
+ * @tb: pointer to tab
+ *
+ * Returns: pointer to user's data.
+ */
+void *mnt_table_get_userdata(struct libmnt_table *tb)
+{
+	assert(tb);
+	return tb ? tb->userdata : NULL;
 }
 
 /**
@@ -159,6 +241,18 @@ void mnt_table_enable_comments(struct libmnt_table *tb, int enable)
 	assert(tb);
 	if (tb)
 		tb->comms = enable;
+}
+
+/**
+ * mnt_table_with_comments:
+ * @tb: pointer to table
+ *
+ * Returns: 1 if comments parsing is enabled, or 0.
+ */
+int mnt_table_with_comments(struct libmnt_table *tb)
+{
+	assert(tb);
+	return tb ? tb->comms : 0;
 }
 
 /**
@@ -283,6 +377,10 @@ int mnt_table_append_trailing_comment(struct libmnt_table *tb, const char *comm)
  * same cache between more threads -- currently the cache does not provide any
  * locking method.
  *
+ * This function increments cache refrence counter. It's recomented to use
+ * mnt_unref_cache() after mnt_table_set_cache() if you want to keep the cache
+ * referenced by @tb only.
+ *
  * See also mnt_new_cache().
  *
  * Returns: 0 on success or negative number in case of error.
@@ -292,6 +390,9 @@ int mnt_table_set_cache(struct libmnt_table *tb, struct libmnt_cache *mpc)
 	assert(tb);
 	if (!tb)
 		return -EINVAL;
+
+	mnt_ref_cache(mpc);			/* new */
+	mnt_unref_cache(tb->cache);		/* old */
 	tb->cache = mpc;
 	return 0;
 }
@@ -313,7 +414,9 @@ struct libmnt_cache *mnt_table_get_cache(struct libmnt_table *tb)
  * @tb: tab pointer
  * @fs: new entry
  *
- * Adds a new entry to tab.
+ * Adds a new entry to tab and increment @fs reference counter. Don't forget to
+ * use mnt_unref_fs() after mnt_table_add_fs() you want to keep the @fs
+ * referenced by the table only.
  *
  * Returns: 0 on success or negative number in case of error.
  */
@@ -325,11 +428,12 @@ int mnt_table_add_fs(struct libmnt_table *tb, struct libmnt_fs *fs)
 	if (!tb || !fs)
 		return -EINVAL;
 
+	mnt_ref_fs(fs);
 	list_add_tail(&fs->ents, &tb->ents);
+	tb->nents++;
 
 	DBG(TAB, mnt_debug_h(tb, "add entry: %s %s",
 			mnt_fs_get_source(fs), mnt_fs_get_target(fs)));
-	tb->nents++;
 	return 0;
 }
 
@@ -337,6 +441,10 @@ int mnt_table_add_fs(struct libmnt_table *tb, struct libmnt_fs *fs)
  * mnt_table_remove_fs:
  * @tb: tab pointer
  * @fs: new entry
+ *
+ * Removes the @fs from the table and de-increment reference counter of the @fs. The
+ * filesystem with zero reference counter will be deallocated. Don't forget to use
+ * mnt_ref_fs() before call mnt_table_remove_fs() if you want to use @fs later.
  *
  * Returns: 0 on success or negative number in case of error.
  */
@@ -347,7 +455,11 @@ int mnt_table_remove_fs(struct libmnt_table *tb, struct libmnt_fs *fs)
 
 	if (!tb || !fs)
 		return -EINVAL;
+
 	list_del(&fs->ents);
+	INIT_LIST_HEAD(&fs->ents);	/* otherwise FS still points to the list */
+
+	mnt_unref_fs(fs);
 	tb->nents--;
 	return 0;
 }
@@ -480,7 +592,6 @@ int mnt_table_next_child_fs(struct libmnt_table *tb, struct libmnt_iter *itr,
  *		const char *dir = mnt_fs_get_target(fs);
  *		printf("mount point: %s\n", dir);
  *	}
- *	mnt_free_table(fi);
  *   </programlisting>
  * </informalexample>
  *
@@ -506,6 +617,46 @@ int mnt_table_next_fs(struct libmnt_table *tb, struct libmnt_iter *itr, struct l
 	}
 
 	return rc;
+}
+
+/**
+ * mnt_table_first_fs:
+ * @tb: tab pointer
+ * @fs: returns the first tab entry
+ *
+ * Returns: 0 on success, negative number in case of error or 1 at the end of list.
+ */
+int mnt_table_first_fs(struct libmnt_table *tb, struct libmnt_fs **fs)
+{
+	assert(tb);
+	assert(fs);
+
+	if (!tb || !fs)
+		return -EINVAL;
+	if (list_empty(&tb->ents))
+		return 1;
+	*fs = list_first_entry(&tb->ents, struct libmnt_fs, ents);
+	return 0;
+}
+
+/**
+ * mnt_table_last_fs:
+ * @tb: tab pointer
+ * @fs: returns the last tab entry
+ *
+ * Returns: 0 on success, negative number in case of error or 1 at the end of list.
+ */
+int mnt_table_last_fs(struct libmnt_table *tb, struct libmnt_fs **fs)
+{
+	assert(tb);
+	assert(fs);
+
+	if (!tb || !fs)
+		return -EINVAL;
+	if (list_empty(&tb->ents))
+		return 1;
+	*fs = list_last_entry(&tb->ents, struct libmnt_fs, ents);
+	return 0;
 }
 
 /**
@@ -709,7 +860,7 @@ struct libmnt_fs *mnt_table_find_srcpath(struct libmnt_table *tb, const char *pa
 {
 	struct libmnt_iter itr;
 	struct libmnt_fs *fs = NULL;
-	int ntags = 0;
+	int ntags = 0, nents;
 	char *cn;
 	const char *p;
 
@@ -735,8 +886,10 @@ struct libmnt_fs *mnt_table_find_srcpath(struct libmnt_table *tb, const char *pa
 
 	DBG(TAB, mnt_debug_h(tb, "lookup canonical SRCPATH: '%s'", cn));
 
+	nents = mnt_table_get_nents(tb);
+
 	/* canonicalized paths in struct libmnt_table */
-	if (ntags < mnt_table_get_nents(tb)) {
+	if (ntags < nents) {
 		mnt_reset_iter(&itr, direction);
 		while(mnt_table_next_fs(tb, &itr, &fs) == 0) {
 			if (mnt_fs_streq_srcpath(fs, cn))
@@ -779,7 +932,7 @@ struct libmnt_fs *mnt_table_find_srcpath(struct libmnt_table *tb, const char *pa
 	}
 
 	/* non-canonicalized paths in struct libmnt_table */
-	if (ntags <= mnt_table_get_nents(tb)) {
+	if (ntags <= nents) {
 		mnt_reset_iter(&itr, direction);
 		while(mnt_table_next_fs(tb, &itr, &fs) == 0) {
 			if (mnt_fs_is_netfs(fs) || mnt_fs_is_pseudofs(fs))
@@ -1127,7 +1280,7 @@ int mnt_table_is_fs_mounted(struct libmnt_table *tb, struct libmnt_fs *fstab_fs)
 	DBG(FS, mnt_debug_h(fstab_fs, "is FS mounted? [target=%s]",
 				mnt_fs_get_target(fstab_fs)));
 
-	if (mnt_fs_is_swaparea(fstab_fs) || mnt_table_get_nents(tb) == 0) {
+	if (mnt_fs_is_swaparea(fstab_fs) || mnt_table_is_empty(tb)) {
 		DBG(FS, mnt_debug_h(fstab_fs, "- ignore (swap or no data)"));
 		return 0;
 	}
@@ -1257,7 +1410,7 @@ struct libmnt_table *create_table(const char *file, int comments)
 	return tb;
 err:
 	fprintf(stderr, "%s: parsing failed\n", file);
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return NULL;
 }
 
@@ -1284,10 +1437,10 @@ int test_copy_fs(struct libmnt_test *ts, int argc, char *argv[])
 
 	printf("COPY:\n");
 	mnt_fs_print_debug(fs, stdout);
-	mnt_free_fs(fs);
+	mnt_unref_fs(fs);
 	rc = 0;
 done:
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -1323,7 +1476,7 @@ int test_parse(struct libmnt_test *ts, int argc, char *argv[])
 	rc = 0;
 done:
 	mnt_free_iter(itr);
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -1351,6 +1504,7 @@ int test_find(struct libmnt_test *ts, int argc, char *argv[], int dr)
 	if (!mpc)
 		goto done;
 	mnt_table_set_cache(tb, mpc);
+	mnt_unref_cache(mpc);
 
 	if (strcasecmp(find, "source") == 0)
 		fs = mnt_table_find_source(tb, what, dr);
@@ -1364,8 +1518,7 @@ int test_find(struct libmnt_test *ts, int argc, char *argv[], int dr)
 		rc = 0;
 	}
 done:
-	mnt_free_table(tb);
-	mnt_free_cache(mpc);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -1393,6 +1546,7 @@ int test_find_pair(struct libmnt_test *ts, int argc, char *argv[])
 	if (!mpc)
 		goto done;
 	mnt_table_set_cache(tb, mpc);
+	mnt_unref_cache(mpc);
 
 	fs = mnt_table_find_pair(tb, argv[2], argv[3], MNT_ITER_FORWARD);
 	if (!fs)
@@ -1401,8 +1555,7 @@ int test_find_pair(struct libmnt_test *ts, int argc, char *argv[])
 	mnt_fs_print_debug(fs, stdout);
 	rc = 0;
 done:
-	mnt_free_table(tb);
-	mnt_free_cache(mpc);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -1420,6 +1573,7 @@ int test_find_mountpoint(struct libmnt_test *ts, int argc, char *argv[])
 	if (!mpc)
 		goto done;
 	mnt_table_set_cache(tb, mpc);
+	mnt_unref_cache(mpc);
 
 	fs = mnt_table_find_mountpoint(tb, argv[1], MNT_ITER_BACKWARD);
 	if (!fs)
@@ -1428,8 +1582,7 @@ int test_find_mountpoint(struct libmnt_test *ts, int argc, char *argv[])
 	mnt_fs_print_debug(fs, stdout);
 	rc = 0;
 done:
-	mnt_free_table(tb);
-	mnt_free_cache(mpc);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -1459,6 +1612,7 @@ static int test_is_mounted(struct libmnt_test *ts, int argc, char *argv[])
 	if (!mpc)
 		goto done;
 	mnt_table_set_cache(tb, mpc);
+	mnt_unref_cache(mpc);
 
 	while(mnt_table_next_fs(fstab, itr, &fs) == 0) {
 		if (mnt_table_is_fs_mounted(tb, fs))
@@ -1473,9 +1627,8 @@ static int test_is_mounted(struct libmnt_test *ts, int argc, char *argv[])
 
 	rc = 0;
 done:
-	mnt_free_table(tb);
-	mnt_free_table(fstab);
-	mnt_free_cache(mpc);
+	mnt_unref_table(tb);
+	mnt_unref_table(fstab);
 	mnt_free_iter(itr);
 	return rc;
 }

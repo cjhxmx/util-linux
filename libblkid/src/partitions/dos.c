@@ -14,7 +14,6 @@
 #include <stdint.h>
 
 #include "partitions.h"
-#include "dos.h"
 #include "aix.h"
 
 /* see superblocks/vfat.c */
@@ -24,19 +23,19 @@ static const struct dos_subtypes {
 	unsigned char type;
 	const struct blkid_idinfo *id;
 } dos_nested[] = {
-	{ BLKID_FREEBSD_PARTITION, &bsd_pt_idinfo },
-	{ BLKID_NETBSD_PARTITION, &bsd_pt_idinfo },
-	{ BLKID_OPENBSD_PARTITION, &bsd_pt_idinfo },
-	{ BLKID_UNIXWARE_PARTITION, &unixware_pt_idinfo },
-	{ BLKID_SOLARIS_X86_PARTITION, &solaris_x86_pt_idinfo },
-	{ BLKID_MINIX_PARTITION, &minix_pt_idinfo }
+	{ MBR_FREEBSD_PARTITION, &bsd_pt_idinfo },
+	{ MBR_NETBSD_PARTITION, &bsd_pt_idinfo },
+	{ MBR_OPENBSD_PARTITION, &bsd_pt_idinfo },
+	{ MBR_UNIXWARE_PARTITION, &unixware_pt_idinfo },
+	{ MBR_SOLARIS_X86_PARTITION, &solaris_x86_pt_idinfo },
+	{ MBR_MINIX_PARTITION, &minix_pt_idinfo }
 };
 
 static inline int is_extended(struct dos_partition *p)
 {
-	return (p->sys_type == BLKID_DOS_EXTENDED_PARTITION ||
-		p->sys_type == BLKID_W95_EXTENDED_PARTITION ||
-		p->sys_type == BLKID_LINUX_EXTENDED_PARTITION);
+	return (p->sys_ind == MBR_DOS_EXTENDED_PARTITION ||
+		p->sys_ind == MBR_W95_EXTENDED_PARTITION ||
+		p->sys_ind == MBR_LINUX_EXTENDED_PARTITION);
 }
 
 static int parse_dos_extended(blkid_probe pr, blkid_parttable tab,
@@ -58,10 +57,10 @@ static int parse_dos_extended(blkid_probe pr, blkid_parttable tab,
 		if (!data)
 			goto leave;	/* malformed partition? */
 
-		if (!is_valid_mbr_signature(data))
+		if (!mbr_is_valid_magic(data))
 			goto leave;
 
-		p0 = (struct dos_partition *) (data + BLKID_MSDOS_PT_OFFSET);
+		p0 = mbr_get_partition(data, 0);
 
 		/* Usually, the first entry is the real data partition,
 		 * the 2nd entry is the next extended partition, or empty,
@@ -80,8 +79,8 @@ static int parse_dos_extended(blkid_probe pr, blkid_parttable tab,
 			blkid_partition par;
 
 			/* the start is relative to the parental ext.partition */
-			start = dos_partition_start(p) * ssf;
-			size = dos_partition_size(p) * ssf;
+			start = dos_partition_get_start(p) * ssf;
+			size = dos_partition_get_size(p) * ssf;
 			abs_start = cur_start + start;	/* absolute start */
 
 			if (!size || is_extended(p))
@@ -101,7 +100,7 @@ static int parse_dos_extended(blkid_probe pr, blkid_parttable tab,
 			if (!par)
 				goto err;
 
-			blkid_partition_set_type(par, p->sys_type);
+			blkid_partition_set_type(par, p->sys_ind);
 			blkid_partition_set_flags(par, p->boot_ind);
 			blkid_partition_gen_uuid(par);
 			ct_nodata = 0;
@@ -111,8 +110,8 @@ static int parse_dos_extended(blkid_probe pr, blkid_parttable tab,
 		 * is junk.
 		 */
 		for (p = p0, i = 0; i < 4; i++, p++) {
-			start = dos_partition_start(p) * ssf;
-			size = dos_partition_size(p) * ssf;
+			start = dos_partition_get_start(p) * ssf;
+			size = dos_partition_get_size(p) * ssf;
 
 			if (size && is_extended(p))
 				break;
@@ -160,7 +159,7 @@ static int probe_dos_pt(blkid_probe pr,
 		goto nothing;
 	}
 
-	p0 = (struct dos_partition *) (data + BLKID_MSDOS_PT_OFFSET);
+	p0 = mbr_get_partition(data, 0);
 
 	/*
 	 * Reject PT where boot indicator is not 0 or 0x80.
@@ -175,16 +174,15 @@ static int probe_dos_pt(blkid_probe pr,
 	 * GPT uses valid MBR
 	 */
 	for (p = p0, i = 0; i < 4; i++, p++) {
-		if (p->sys_type == BLKID_GPT_PARTITION) {
+		if (p->sys_ind == MBR_GPT_PARTITION) {
 			DBG(LOWPROBE, blkid_debug("probably GPT -- ignore"));
 			goto nothing;
 		}
 	}
 
-	blkid_probe_use_wiper(pr, BLKID_MSDOS_PT_OFFSET,
-				  512 - BLKID_MSDOS_PT_OFFSET);
+	blkid_probe_use_wiper(pr, MBR_PT_OFFSET, 512 - MBR_PT_OFFSET);
 
-	id = dos_parttable_id(data);
+	id = mbr_get_id(data);
 	if (id)
 		snprintf(idstr, sizeof(idstr), "%08x", id);
 
@@ -207,7 +205,7 @@ static int probe_dos_pt(blkid_probe pr,
 	ssf = blkid_probe_get_sectorsize(pr) / 512;
 
 	/* allocate a new partition table */
-	tab = blkid_partlist_new_parttable(ls, "dos", BLKID_MSDOS_PT_OFFSET);
+	tab = blkid_partlist_new_parttable(ls, "dos", MBR_PT_OFFSET);
 	if (!tab)
 		goto err;
 
@@ -218,8 +216,8 @@ static int probe_dos_pt(blkid_probe pr,
 	for (p = p0, i = 0; i < 4; i++, p++) {
 		blkid_partition par;
 
-		start = dos_partition_start(p) * ssf;
-		size = dos_partition_size(p) * ssf;
+		start = dos_partition_get_start(p) * ssf;
+		size = dos_partition_get_size(p) * ssf;
 
 		if (!size) {
 			/* Linux kernel ignores empty partitions, but partno for
@@ -231,7 +229,7 @@ static int probe_dos_pt(blkid_probe pr,
 		if (!par)
 			goto err;
 
-		blkid_partition_set_type(par, p->sys_type);
+		blkid_partition_set_type(par, p->sys_ind);
 		blkid_partition_set_flags(par, p->boot_ind);
 		blkid_partition_gen_uuid(par);
 	}
@@ -243,8 +241,8 @@ static int probe_dos_pt(blkid_probe pr,
 
 	/* Parse logical partitions */
 	for (p = p0, i = 0; i < 4; i++, p++) {
-		start = dos_partition_start(p) * ssf;
-		size = dos_partition_size(p) * ssf;
+		start = dos_partition_get_start(p) * ssf;
+		size = dos_partition_get_size(p) * ssf;
 
 		if (!size)
 			continue;
@@ -258,11 +256,11 @@ static int probe_dos_pt(blkid_probe pr,
 		for (p = p0, i = 0; i < 4; i++, p++) {
 			size_t n;
 
-			if (!dos_partition_size(p) || is_extended(p))
+			if (!dos_partition_get_size(p) || is_extended(p))
 				continue;
 
 			for (n = 0; n < ARRAY_SIZE(dos_nested); n++) {
-				if (dos_nested[n].type != p->sys_type)
+				if (dos_nested[n].type != p->sys_ind)
 					continue;
 
 				if (blkid_partitions_do_subprobe(pr,

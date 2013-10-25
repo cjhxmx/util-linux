@@ -70,8 +70,8 @@ void mnt_free_update(struct libmnt_update *upd)
 
 	DBG(UPDATE, mnt_debug_h(upd, "free"));
 
-	mnt_free_fs(upd->fs);
-	mnt_free_table(upd->mountinfo);
+	mnt_unref_fs(upd->fs);
+	mnt_unref_table(upd->mountinfo);
 	free(upd->target);
 	free(upd->filename);
 	free(upd);
@@ -180,7 +180,7 @@ int mnt_update_set_fs(struct libmnt_update *upd, unsigned long mountflags,
 		DBG(UPDATE, mnt_fs_print_debug(fs, stderr));
 	}
 
-	mnt_free_fs(upd->fs);
+	mnt_unref_fs(upd->fs);
 	free(upd->target);
 	upd->ready = FALSE;
 	upd->fs = NULL;
@@ -350,7 +350,7 @@ static int utab_new_entry(struct libmnt_update *upd, struct libmnt_fs *fs,
 	return 0;
 err:
 	free(u);
-	mnt_free_fs(upd->fs);
+	mnt_unref_fs(upd->fs);
 	upd->fs = NULL;
 	return rc;
 }
@@ -640,6 +640,12 @@ int mnt_table_replace_file(struct libmnt_table *tb, const char *filename)
 
 		mnt_table_write_file(tb, f);
 
+		if (fflush(f) != 0) {
+			rc = -errno;
+			DBG(UPDATE, mnt_debug("%s: fflush failed: %m", uq));
+			goto leave;
+		}
+
 		rc = fchmod(fd, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) ? -errno : 0;
 
 		if (!rc && stat(filename, &st) == 0)
@@ -647,19 +653,25 @@ int mnt_table_replace_file(struct libmnt_table *tb, const char *filename)
 			rc = fchown(fd, st.st_uid, st.st_gid) ? -errno : 0;
 
 		fclose(f);
+		f = NULL;
+
 		if (!rc)
-			rename(uq, filename);
+			rc = rename(uq, filename) ? -errno : 0;
 	} else {
 		rc = -errno;
 		close(fd);
 	}
 
+leave:
+	if (f)
+		fclose(f);
 	unlink(uq);
 	free(uq);
 
 	DBG(TAB, mnt_debug_h(tb, "replace done [rc=%d]", rc));
 	return rc;
 }
+
 static int add_file_entry(struct libmnt_table *tb, struct libmnt_update *upd)
 {
 	struct libmnt_fs *fs;
@@ -671,6 +683,8 @@ static int add_file_entry(struct libmnt_table *tb, struct libmnt_update *upd)
 		return -ENOMEM;
 
 	mnt_table_add_fs(tb, fs);
+	mnt_unref_fs(fs);
+
 	return update_table(upd, tb);
 }
 
@@ -696,7 +710,7 @@ static int update_add_entry(struct libmnt_update *upd, struct libmnt_lock *lc)
 	if (lc)
 		mnt_unlock_file(lc);
 
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -722,13 +736,12 @@ static int update_remove_entry(struct libmnt_update *upd, struct libmnt_lock *lc
 		if (rem) {
 			mnt_table_remove_fs(tb, rem);
 			rc = update_table(upd, tb);
-			mnt_free_fs(rem);
 		}
 	}
 	if (lc)
 		mnt_unlock_file(lc);
 
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -760,7 +773,7 @@ static int update_modify_target(struct libmnt_update *upd, struct libmnt_lock *l
 	if (lc)
 		mnt_unlock_file(lc);
 
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -802,7 +815,7 @@ static int update_modify_options(struct libmnt_update *upd, struct libmnt_lock *
 	if (lc)
 		mnt_unlock_file(lc);
 
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -905,7 +918,7 @@ static int test_add(struct libmnt_test *ts, int argc, char *argv[])
 	mnt_fs_set_options(fs, argv[4]);
 
 	rc = update(NULL, fs, 0);
-	mnt_free_fs(fs);
+	mnt_unref_fs(fs);
 	return rc;
 }
 
@@ -928,7 +941,7 @@ static int test_move(struct libmnt_test *ts, int argc, char *argv[])
 
 	rc = update(NULL, fs, MS_MOVE);
 
-	mnt_free_fs(fs);
+	mnt_unref_fs(fs);
 	return rc;
 }
 
@@ -943,7 +956,7 @@ static int test_remount(struct libmnt_test *ts, int argc, char *argv[])
 	mnt_fs_set_options(fs, argv[2]);
 
 	rc = update(NULL, fs, MS_REMOUNT);
-	mnt_free_fs(fs);
+	mnt_unref_fs(fs);
 	return rc;
 }
 
@@ -962,10 +975,12 @@ static int test_replace(struct libmnt_test *ts, int argc, char *argv[])
 	mnt_fs_set_source(fs, argv[1]);
 	mnt_fs_set_target(fs, argv[2]);
 	mnt_fs_append_comment(fs, "# this is new filesystem\n");
+
 	mnt_table_add_fs(tb, fs);
+	mnt_unref_fs(fs);
 
 	rc = mnt_table_replace_file(tb, mnt_get_fstab_path());
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 

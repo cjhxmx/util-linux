@@ -28,6 +28,7 @@
 
 #include "nls.h"
 #include "c.h"
+#include "xalloc.h"
 #include "closestream.h"
 #include "optutils.h"
 #include "pathnames.h"
@@ -232,7 +233,7 @@ static void add_flag_line(struct tt *tt, struct wdinfo *wd, const struct wdflag 
 		}
 
 		if (str)
-			tt_line_set_data(line, i, str);
+			tt_line_set_data(line, i, xstrdup(str));
 	}
 }
 
@@ -244,7 +245,7 @@ static int show_flags(struct wdinfo *wd, int tt_flags, uint32_t wanted)
 	uint32_t flags;
 
 	/* create output table */
-	tt = tt_new_table(tt_flags);
+	tt = tt_new_table(tt_flags | TT_FL_FREEDATA);
 	if (!tt) {
 		warn(_("failed to initialize output table"));
 		return -1;
@@ -333,7 +334,8 @@ static int set_watchdog(struct wdinfo *wd, int timeout)
 	if (close_fd(fd))
 		warn(_("write failed"));
 	sigprocmask(SIG_SETMASK, &oldsigs, NULL);
-	printf("Set timeout to %d seconds\n", timeout);
+	printf(P_("Timeout has been set to %d second.\n",
+		  "Timeout has been set to %d seconds.\n", timeout), timeout);
 
 	return rc;
 }
@@ -448,11 +450,14 @@ static void print_oneline(struct wdinfo *wd, uint32_t wanted,
 static void show_timeouts(struct wdinfo *wd)
 {
 	if (wd->has_timeout)
-		printf(_("%-15s%2i seconds\n"), _("Timeout:"), wd->timeout);
+		printf(P_("%-14s %2i second\n", "%-14s %2i seconds\n", wd->timeout),
+			  _("Timeout:"), wd->timeout);
 	if (wd->has_pretimeout)
-		printf(_("%-15s%2i seconds\n"), _("Pre-timeout:"), wd->pretimeout);
+		printf(P_("%-14s %2i second\n", "%-14s %2i seconds\n", wd->pretimeout),
+			  _("Pre-timeout:"), wd->pretimeout);
 	if (wd->has_timeleft)
-		printf(_("%-15s%2i seconds\n"), _("Timeleft:"), wd->timeleft);
+		printf(P_("%-14s %2i second\n", "%-14s %2i seconds\n", wd->timeleft),
+			  _("Timeleft:"), wd->timeleft);
 }
 
 int main(int argc, char *argv[])

@@ -42,16 +42,62 @@
 
 #include "c.h"
 #include "nls.h"
+#include "optutils.h"
 #include "pathnames.h"
 #include "xalloc.h"
 #include "closestream.h"
+#include "carefulputc.h"
+#include "strutils.h"
+#include "timeutils.h"
+
+#if defined(_HAVE_UT_TV)
+# define UL_UT_TIME ut_tv.tv_sec
+#else
+# define UL_UT_TIME ut_time
+#endif
 
 #ifndef SHUTDOWN_TIME
 # define SHUTDOWN_TIME 254
 #endif
 
-#define CHOP_DOMAIN	0	/* Define to chop off local domainname. */
+#ifndef LAST_LOGIN_LEN
+# define LAST_LOGIN_LEN 8
+#endif
+
+#ifndef LAST_DOMAIN_LEN
+# define LAST_DOMAIN_LEN 16
+#endif
+
+#ifndef LAST_TIMESTAMP_LEN
+# define LAST_TIMESTAMP_LEN 32
+#endif
+
 #define UCHUNKSIZE	16384	/* How much we read at once. */
+
+struct last_control {
+	unsigned int lastb :1,	  /* Is this command 'lastb' */
+		     extended :1, /* Lots of info */
+		     showhost :1, /* Show hostname */
+		     altlist :1,  /* Hostname at the end */
+		     usedns :1,	  /* Use DNS to lookup the hostname */
+		     useip :1,	  /* Print IP address in number format */
+		     fulltime :1; /* Print full dates and times */
+
+	unsigned int name_len;	/* Number of login name characters to print */
+	unsigned int domain_len; /* Number of domain name characters to print */
+	unsigned int maxrecs;	/* Maximum number of records to list */
+
+	char **show;		/* Match search list */
+
+	char **altv;		/* Alternate wtmp files */
+	unsigned int altc;	/* Number of alternative files */
+	unsigned int alti;	/* Index number of the alternative file */
+
+	time_t since;		/* at what time to start displaying the file */
+	time_t until;		/* at what time to stop displaying the file */
+	time_t present;		/* who where present at time_t */
+	unsigned int time_fmt;	/* time format */
+};
 
 /* Double linked list of struct utmp's */
 struct utmplist {
@@ -62,37 +108,58 @@ struct utmplist {
 struct utmplist *utmplist = NULL;
 
 /* Types of listing */
-#define R_CRASH		1 /* No logout record, system boot in between */
-#define R_DOWN		2 /* System brought down in decent way */
-#define R_NORMAL	3 /* Normal */
-#define R_NOW		4 /* Still logged in */
-#define R_REBOOT	5 /* Reboot record. */
-#define R_PHANTOM	6 /* No logout record but session is stale. */
-#define R_TIMECHANGE	7 /* NEW_TIME or OLD_TIME */
+enum {
+	R_CRASH = 1,	/* No logout record, system boot in between */
+	R_DOWN,		/* System brought down in decent way */
+	R_NORMAL,	/* Normal */
+	R_NOW,		/* Still logged in */
+	R_REBOOT,	/* Reboot record. */
+	R_PHANTOM,	/* No logout record but session is stale. */
+	R_TIMECHANGE	/* NEW_TIME or OLD_TIME */
+};
+
+enum {
+	LAST_TIMEFTM_NONE = 0,
+	LAST_TIMEFTM_SHORT_CTIME,
+	LAST_TIMEFTM_FULL_CTIME,
+	LAST_TIMEFTM_ISO8601
+};
+
+struct last_timefmt {
+	const char *name;
+	int in;
+	int out;
+};
+
+static struct last_timefmt timefmts[] = {
+	[LAST_TIMEFTM_NONE]	   = { "notime", 0, 0 },
+	[LAST_TIMEFTM_SHORT_CTIME] = { "short", 16, 7},
+	[LAST_TIMEFTM_FULL_CTIME]  = { "full",  24, 26},
+	[LAST_TIMEFTM_ISO8601]	   = { "iso", 24, 26}
+};
 
 /* Global variables */
-static int maxrecs = 0;		/* Maximum number of records to list. */
-static int recsdone = 0;	/* Number of records listed */
-static int showhost = 1;	/* Show hostname too? */
-static int altlist = 0;		/* Show hostname at the end. */
-static int usedns = 0;		/* Use DNS to lookup the hostname. */
-static int useip = 0;		/* Print IP address in number format */
-static int fulltime = 0;	/* Print full dates and times */
-static int name_len = 8;	/* Default print 8 characters of name */
-static int domain_len = 16;	/* Default print 16 characters of domain */
-static char **show = NULL;	/* What do they want us to show */
-static char *ufile;		/* Filename of this file */
+static unsigned int recsdone;	/* Number of records listed */
 static time_t lastdate;		/* Last date we've seen */
-#if CHOP_DOMAIn
-static char hostname[256];	/* For gethostbyname() */
-static char *domainname;	/* Our domainname. */
-#endif
+
+/* --time-format=option parser */
+static int which_time_format(const char *optarg)
+{
+	size_t i;
+
+	for (i = 0; i < ARRAY_SIZE(timefmts); i++) {
+		if (strcmp(timefmts[i].name, optarg) == 0)
+			return i;
+	}
+	errx(EXIT_FAILURE, _("unknown time format: %s"), optarg);
+}
 
 /*
  *	Read one utmp entry, return in new format.
  *	Automatically reposition file pointer.
  */
-static int uread(FILE *fp, struct utmp *u, int *quit)
+static int uread(const struct last_control *ctl, FILE *fp, struct utmp *u,
+		 int *quit)
 {
 	static int utsize;
 	static char buf[UCHUNKSIZE];
@@ -119,12 +186,12 @@ static int uread(FILE *fp, struct utmp *u, int *quit)
 			return 0;
 		o = ((fpos - 1) / UCHUNKSIZE) * UCHUNKSIZE;
 		if (fseeko(fp, o, SEEK_SET) < 0) {
-			warn(_("seek failed: %s"), ufile);
+			warn(_("seek on %s failed"), ctl->altv[ctl->alti]);
 			return 0;
 		}
 		bpos = (int)(fpos - o);
 		if (fread(buf, bpos, 1, fp) != 1) {
-			warn(_("read failed: %s"), ufile);
+			warn(_("cannot read %s"), ctl->altv[ctl->alti]);
 			return 0;
 		}
 		fpos = o;
@@ -153,7 +220,7 @@ static int uread(FILE *fp, struct utmp *u, int *quit)
 	 */
 	memcpy(tmp + (-bpos), buf, utsize + bpos);
 	if (fseeko(fp, fpos, SEEK_SET) < 0) {
-		warn(_("seek failed: %s"), ufile);
+		warn(_("seek on %s failed"), ctl->altv[ctl->alti]);
 		return 0;
 	}
 
@@ -161,7 +228,7 @@ static int uread(FILE *fp, struct utmp *u, int *quit)
 	 *	Read another UCHUNKSIZE bytes.
 	 */
 	if (fread(buf, UCHUNKSIZE, 1, fp) != 1) {
-		warn(_("read failed: %s"), ufile);
+		warn(_("cannot read %s"), ctl->altv[ctl->alti]);
 		return 0;
 	}
 
@@ -248,21 +315,78 @@ static int dns_lookup(char *result, int size, int useip, int32_t *a)
 	return getnameinfo(sa, salen, result, size, NULL, 0, flags);
 }
 
+static int time_formatter(const struct last_control *ctl, char *dst,
+			  size_t dlen, time_t *when, int pos)
+{
+	struct tm *tm;
+	int ret = 0;
+
+	switch (ctl->time_fmt) {
+	case LAST_TIMEFTM_NONE:
+		*dst = 0;
+		break;
+	case LAST_TIMEFTM_SHORT_CTIME:
+		if (pos == 0)
+			ret = sprintf(dst, "%s", ctime(when));
+		else {
+			tm = localtime(when);
+			if (!strftime(dst, dlen, "- %H:%M", tm))
+				ret = -1;
+		}
+		break;
+	case LAST_TIMEFTM_FULL_CTIME:
+		if (pos == 0)
+			ret = sprintf(dst, "%s", ctime(when));
+		else
+			ret = sprintf(dst, "- %s", ctime(when));
+		break;
+	case LAST_TIMEFTM_ISO8601:
+		tm = localtime(when);
+		if (pos == 0) {
+			if (!strftime(dst, dlen, "%Y-%m-%dT%H:%M:%S%z", tm))
+				ret = -1;
+		} else if (!strftime(dst, dlen, "- %Y-%m-%dT%H:%M:%S%z", tm))
+			ret = -1;
+		break;
+	default:
+		abort();
+	}
+	return ret;
+}
+
+/*
+ *	Remove trailing spaces from a string.
+ */
+static void trim_trailing_spaces(char *s)
+{
+	char *p;
+
+	for (p = s; *p; ++p)
+		continue;
+	while (p > s && isspace(*--p))
+		continue;
+	if (p > s)
+		++p;
+	*p++ = '\n';
+	*p = '\0';
+}
+
 /*
  *	Show one line of information on screen
  */
-static int list(struct utmp *p, time_t t, int what)
+static int list(const struct last_control *ctl, struct utmp *p, time_t t, int what)
 {
-	time_t		secs, tmp;
-	char		logintime[32];
-	char		logouttime[32];
-	char		length[32];
+	time_t		secs, tmp, epoch;
+	char		logintime[LAST_TIMESTAMP_LEN];
+	char		logouttime[LAST_TIMESTAMP_LEN];
+	char		length[LAST_TIMESTAMP_LEN];
 	char		final[512];
 	char		utline[UT_LINESIZE+1];
 	char		domain[256];
-	char		*s, **walk;
+	char		*s;
 	int		mins, hours, days;
 	int		r, len;
+	struct last_timefmt *fmt;
 
 	/*
 	 *	uucp and ftp have special-type entries
@@ -277,9 +401,10 @@ static int list(struct utmp *p, time_t t, int what)
 	/*
 	 *	Is this something we wanna show?
 	 */
-	if (show) {
-		for (walk = show; *walk; walk++) {
-			if (strncmp(p->ut_name, *walk, UT_NAMESIZE) == 0 ||
+	if (ctl->show) {
+		char **walk;
+		for (walk = ctl->show; *walk; walk++) {
+			if (strncmp(p->ut_user, *walk, UT_NAMESIZE) == 0 ||
 			    strcmp(utline, *walk) == 0 ||
 			    (strncmp(utline, "tty", 3) == 0 &&
 			     strcmp(utline + 3, *walk) == 0)) break;
@@ -290,20 +415,29 @@ static int list(struct utmp *p, time_t t, int what)
 	/*
 	 *	Calculate times
 	 */
-	tmp = (time_t)p->ut_time;
-	strcpy(logintime, ctime(&tmp));
-	if (fulltime)
-		sprintf(logouttime, "- %s", ctime(&t));
-	else {
-		logintime[16] = 0;
-		sprintf(logouttime, "- %s", ctime(&t) + 11);
-		logouttime[7] = 0;
-	}
-	secs = t - p->ut_time;
+	tmp = p->UL_UT_TIME;
+
+	if (ctl->present && (ctl->present < tmp || (0 < t && t < ctl->present)))
+		return 0;
+
+	if (time_formatter(ctl, &logintime[0], sizeof(logintime), &tmp, 0) < 0 ||
+	    time_formatter(ctl, &logouttime[0], sizeof(logouttime), &t, 1) < 0)
+		errx(EXIT_FAILURE, _("preallocation size exceeded"));
+
+	secs = t - p->UL_UT_TIME;
 	mins  = (secs / 60) % 60;
 	hours = (secs / 3600) % 24;
 	days  = secs / 86400;
-	if (days)
+
+	epoch = time(NULL);
+	if (t == epoch) {
+		if (ctl->fulltime)
+			sprintf(logouttime, "  still running");
+		else {
+			sprintf(logouttime, "  still");
+			sprintf(length, "running");
+		}
+	} else if (days)
 		sprintf(length, "(%d+%02d:%02d)", days, hours, mins);
 	else
 		sprintf(length, " (%02d:%02d)", hours, mins);
@@ -317,7 +451,7 @@ static int list(struct utmp *p, time_t t, int what)
 			break;
 		case R_NOW:
 			length[0] = 0;
-			if (fulltime)
+			if (ctl->fulltime)
 				sprintf(logouttime, "  still logged in");
 			else {
 				sprintf(logouttime, "  still");
@@ -326,7 +460,7 @@ static int list(struct utmp *p, time_t t, int what)
 			break;
 		case R_PHANTOM:
 			length[0] = 0;
-			if (fulltime)
+			if (ctl->fulltime)
 				sprintf(logouttime, "  gone - no logout");
 			else {
 				sprintf(logouttime, "   gone");
@@ -341,14 +475,16 @@ static int list(struct utmp *p, time_t t, int what)
 			break;
 		case R_NORMAL:
 			break;
+		default:
+			abort();
 	}
 
 	/*
 	 *	Look up host with DNS if needed.
 	 */
 	r = -1;
-	if (usedns || useip)
-		r = dns_lookup(domain, sizeof(domain), useip, p->ut_addr_v6);
+	if (ctl->usedns || ctl->useip)
+		r = dns_lookup(domain, sizeof(domain), ctl->useip, p->ut_addr_v6);
 	if (r < 0) {
 		len = UT_HOSTSIZE;
 		if (len >= (int)sizeof(domain)) len = sizeof(domain) - 1;
@@ -356,36 +492,29 @@ static int list(struct utmp *p, time_t t, int what)
 		strncat(domain, p->ut_host, len);
 	}
 
-	if (showhost) {
-#if CHOP_DOMAIN
-		/*
-		 *	See if this is in our domain.
-		 */
-		if (!usedns && (s = strchr(p->ut_host, '.')) != NULL &&
-		     strcmp(s + 1, domainname) == 0) *s = 0;
-#endif
-		if (!altlist) {
+	fmt = &timefmts[ctl->time_fmt];
+
+	if (ctl->showhost) {
+		if (!ctl->altlist) {
 			len = snprintf(final, sizeof(final),
-				fulltime ?
-				"%-8.*s %-12.12s %-16.*s %-24.24s %-26.26s %-12.12s\n" :
-				"%-8.*s %-12.12s %-16.*s %-16.16s %-7.7s %-12.12s\n",
-				name_len, p->ut_name, utline,
-				domain_len, domain, logintime, logouttime, length);
+				"%-8.*s %-12.12s %-16.*s %-*.*s %-*.*s %s\n",
+				ctl->name_len, p->ut_user, utline,
+				ctl->domain_len, domain,
+				fmt->in, fmt->in, logintime, fmt->out, fmt->out,
+				logouttime, length);
 		} else {
 			len = snprintf(final, sizeof(final),
-				fulltime ?
-				"%-8.*s %-12.12s %-24.24s %-26.26s %-12.12s %s\n" :
-				"%-8.*s %-12.12s %-16.16s %-7.7s %-12.12s %s\n",
-				name_len, p->ut_name, utline,
-				logintime, logouttime, length, domain);
+				"%-8.*s %-12.12s %-*.*s %-*.*s %-12.12s %s\n",
+				ctl->name_len, p->ut_user, utline,
+				fmt->in, fmt->in, logintime, fmt->out, fmt->out,
+				logouttime, length, domain);
 		}
 	} else
 		len = snprintf(final, sizeof(final),
-			fulltime ?
-			"%-8.*s %-12.12s %-24.24s %-26.26s %-12.12s\n" :
-			"%-8.*s %-12.12s %-16.16s %-7.7s %-12.12s\n",
-			name_len, p->ut_name, utline,
-			logintime, logouttime, length);
+			"%-8.*s %-12.12s %-*.*s %-*.*s %s\n",
+			ctl->name_len, p->ut_user, utline,
+			fmt->in, fmt->in, logintime, fmt->out, fmt->out,
+			logouttime, length);
 
 #if defined(__GLIBC__)
 #  if (__GLIBC__ == 2) && (__GLIBC_MINOR__ == 0)
@@ -393,21 +522,18 @@ static int list(struct utmp *p, time_t t, int what)
 #  endif
 #endif
 
+	trim_trailing_spaces(final);
 	/*
 	 *	Print out "final" string safely.
 	 */
-	for (s = final; *s; s++) {
-		if (*s == '\n' || (*s >= 32 && (unsigned char)*s <= 126))
-			putchar(*s);
-		else
-			putchar('*');
-	}
+	for (s = final; *s; s++)
+		carefulputc(*s, stdout, '*');
 
 	if (len < 0 || (size_t)len >= sizeof(final))
 		putchar('\n');
 
 	recsdone++;
-	if (maxrecs && recsdone >= maxrecs)
+	if (ctl->maxrecs && ctl->maxrecs <= recsdone)
 		return 1;
 
 	return 0;
@@ -418,7 +544,7 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 {
 	fputs(USAGE_HEADER, out);
 	fprintf(out, _(
-		" %s [options]\n"), program_invocation_short_name);
+		" %s [options] [<username>...] [<tty>...]\n"), program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
 	fputs(_(" -<number>            how many lines to show\n"), out);
@@ -430,59 +556,24 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	fputs(_(" -i, --ip             display IP numbers in numbers-and-dots notation\n"), out);
 	fputs(_(" -n, --limit <number> how many lines to show\n"), out);
 	fputs(_(" -R, --nohostname     don't display the hostname field\n"), out);
-	fputs(_(" -t, --until <YYYYMMDDHHMMSS>  display the state of the specified time\n"), out);
+	fputs(_(" -s, --since <time>   display the lines since the specified time\n"), out);
+	fputs(_(" -t, --until <time>   display the lines until the specified time\n"), out);
+	fputs(_(" -p, --present <time> display who where present at the specified time\n"), out);
 	fputs(_(" -w, --fullnames      display full user and domain names\n"), out);
 	fputs(_(" -x, --system         display system shutdown entries and run level changes\n"), out);
+	fputs(_("     --time-format <format>  show time stamp using format:\n"), out);
+	fputs(_("                               [notime|short|full|iso]\n"), out);
 
 	fputs(USAGE_SEPARATOR, out);
 	fputs(USAGE_HELP, out);
 	fputs(USAGE_VERSION, out);
-	fprintf(out, USAGE_MAN_TAIL("last(1))"));
+	fprintf(out, USAGE_MAN_TAIL("last(1)"));
 
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
 
-static time_t parsetm(char *ts)
-{
-	struct tm	u, origu;
-	time_t		tm;
-
-	memset(&tm, 0, sizeof(tm));
-
-	if (sscanf(ts, "%4d%2d%2d%2d%2d%2d", &u.tm_year,
-	    &u.tm_mon, &u.tm_mday, &u.tm_hour, &u.tm_min,
-	    &u.tm_sec) != 6)
-		return (time_t)-1;
-
-	u.tm_year -= 1900;
-	u.tm_mon -= 1;
-	u.tm_isdst = -1;
-
-	origu = u;
-
-	if ((tm = mktime(&u)) == (time_t)-1)
-		return tm;
-
-	/*
-	 *	Unfortunately mktime() is much more forgiving than
-	 *	it should be.  For example, it'll gladly accept
-	 *	"30" as a valid month number.  This behavior is by
-	 *	design, but we don't like it, so we want to detect
-	 *	it and complain.
-	 */
-	if (u.tm_year != origu.tm_year ||
-	    u.tm_mon != origu.tm_mon ||
-	    u.tm_mday != origu.tm_mday ||
-	    u.tm_hour != origu.tm_hour ||
-	    u.tm_min != origu.tm_min ||
-	    u.tm_sec != origu.tm_sec)
-		return (time_t)-1;
-
-	return tm;
-}
-
-int main(int argc, char **argv)
+static void process_wtmp_file(const struct last_control *ctl)
 {
 	FILE *fp;		/* Filepointer of wtmp file */
 
@@ -500,95 +591,6 @@ int main(int argc, char **argv)
 	struct stat st;		/* To stat the [uw]tmp file */
 	int quit = 0;		/* Flag */
 	int down = 0;		/* Down flag */
-	int lastb = 0;		/* Is this 'lastb' ? */
-	int extended = 0;	/* Lots of info. */
-	char *altufile = NULL;	/* Alternate wtmp */
-
-	time_t until = 0;	/* at what time to stop parsing the file */
-
-	static const struct option long_opts[] = {
-	      { "limit",	required_argument, NULL, 'n' },
-	      { "help",	no_argument,       NULL, 'h' },
-	      { "file",       required_argument, NULL, 'f' },
-	      { "nohostname", no_argument,       NULL, 'R' },
-	      { "version",    no_argument,       NULL, 'V' },
-	      { "hostlast",   no_argument,       NULL, 'a' },
-	      { "until",      required_argument, NULL, 't' },
-	      { "system",     no_argument,       NULL, 'x' },
-	      { "dns",        no_argument,       NULL, 'd' },
-	      { "ip",         no_argument,       NULL, 'i' },
-	      { "fulltimes",  no_argument,       NULL, 'F' },
-	      { "fullnames",  no_argument,       NULL, 'w' },
-	      { NULL, 0, NULL, 0 }
-	};
-
-	setlocale(LC_ALL, "");
-	bindtextdomain(PACKAGE, LOCALEDIR);
-	textdomain(PACKAGE);
-	atexit(close_stdout);
-
-	while ((c = getopt_long(argc, argv,
-			"hVf:n:RxadFit:0123456789w", long_opts, NULL)) != -1) {
-		switch(c) {
-		case 'h':
-			usage(stdout);
-			break;
-		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
-		case 'R':
-			showhost = 0;
-			break;
-		case 'x':
-			extended = 1;
-			break;
-		case 'n':
-			maxrecs = atoi(optarg);
-			break;
-		case 'f':
-			altufile = xstrdup(optarg);
-			break;
-		case 'd':
-			usedns++;
-			break;
-		case 'i':
-			useip++;
-			break;
-		case 'a':
-			altlist++;
-			break;
-		case 'F':
-			fulltime++;
-			break;
-		case 't':
-			until = parsetm(optarg);
-			if (until == (time_t) -1)
-				errx(EXIT_FAILURE, _("invalid time value \"%s\""), optarg);
-			break;
-		case 'w':
-			if (UT_NAMESIZE > name_len)
-				name_len = UT_NAMESIZE;
-			if (UT_HOSTSIZE > domain_len)
-				domain_len = UT_HOSTSIZE;
-			break;
-		case '0': case '1': case '2': case '3': case '4':
-		case '5': case '6': case '7': case '8': case '9':
-			maxrecs = 10 * maxrecs + c - '0';
-			break;
-		default:
-			usage(stderr);
-			break;
-		}
-	}
-
-	if (optind < argc)
-		show = argv + optind;
-
-	/*
-	 * Which file do we want to read?
-	 */
-	lastb = !strcmp(program_invocation_short_name, "lastb");
-	ufile = altufile ? altufile : lastb ? _PATH_BTMP : _PATH_WTMP;
 
 	time(&lastdown);
 	lastrch = lastdown;
@@ -598,30 +600,6 @@ int main(int argc, char **argv)
 	 */
 	lastdate = lastdown;
 
-#if CHOP_DOMAIN
-	/*
-	 * Find out domainname.
-	 *
-	 * This doesn't work on modern systems, where only a DNS
-	 * lookup of the result from hostname() will get you the domainname.
-	 * Remember that domainname() is the NIS domainname, not DNS.
-	 * So basically this whole piece of code is bullshit.
-	 */
-	hostname[0] = 0;
-	gethostname(hostname, sizeof(hostname));
-
-	if ((domainname = strchr(hostname, '.')) != NULL)
-		domainname++;
-	if (domainname == NULL || domainname[0] == 0) {
-		hostname[0] = 0;
-		getdomainname(hostname, sizeof(hostname));
-		hostname[sizeof(hostname) - 1] = 0;
-		domainname = hostname;
-
-		if (strcmp(domainname, "(none)") == 0 || domainname[0] == 0)
-			domainname = NULL;
-	}
-#endif
 	/*
 	 * Install signal handlers
 	 */
@@ -631,8 +609,8 @@ int main(int argc, char **argv)
 	/*
 	 * Open the utmp file
 	 */
-	if ((fp = fopen(ufile, "r")) == NULL)
-		err(EXIT_FAILURE, _("cannot open %s"), ufile);
+	if ((fp = fopen(ctl->altv[ctl->alti], "r")) == NULL)
+		err(EXIT_FAILURE, _("cannot open %s"), ctl->altv[ctl->alti]);
 
 	/*
 	 * Optimize the buffer size.
@@ -642,10 +620,11 @@ int main(int argc, char **argv)
 	/*
 	 * Read first structure to capture the time field
 	 */
-	if (uread(fp, &ut, NULL) == 1)
-		begintime = ut.ut_time;
+	if (uread(ctl, fp, &ut, NULL) == 1)
+		begintime = ut.UL_UT_TIME;
 	else {
-		fstat(fileno(fp), &st);
+		if (fstat(fileno(fp), &st) != 0)
+			err(EXIT_FAILURE, _("stat failed %s"), ctl->altv[ctl->alti]);
 		begintime = st.st_ctime;
 		quit = 1;
 	}
@@ -654,23 +633,26 @@ int main(int argc, char **argv)
 	 * Go to end of file minus one structure
 	 * and/or initialize utmp reading code.
 	 */
-	uread(fp, NULL, NULL);
+	uread(ctl, fp, NULL, NULL);
 
 	/*
 	 * Read struct after struct backwards from the file.
 	 */
 	while (!quit) {
 
-		if (uread(fp, &ut, &quit) != 1)
+		if (uread(ctl, fp, &ut, &quit) != 1)
 			break;
 
-		if (until && until < ut.ut_time)
+		if (ctl->since && ut.UL_UT_TIME < ctl->since)
 			continue;
 
-		lastdate = ut.ut_time;
+		if (ctl->until && ctl->until < ut.UL_UT_TIME)
+			continue;
 
-		if (lastb) {
-			quit = list(&ut, ut.ut_time, R_NORMAL);
+		lastdate = ut.UL_UT_TIME;
+
+		if (ctl->lastb) {
+			quit = list(ctl, &ut, ut.UL_UT_TIME, R_NORMAL);
 			continue;
 		}
 
@@ -692,21 +674,21 @@ int main(int argc, char **argv)
 		 */
 		else {
 			if (ut.ut_type != DEAD_PROCESS &&
-			    ut.ut_name[0] && ut.ut_line[0] &&
-			    strcmp(ut.ut_name, "LOGIN") != 0)
+			    ut.ut_user[0] && ut.ut_line[0] &&
+			    strcmp(ut.ut_user, "LOGIN") != 0)
 				ut.ut_type = USER_PROCESS;
 			/*
 			 * Even worse, applications that write ghost
 			 * entries: ut_type set to USER_PROCESS but
-			 * empty ut_name...
+			 * empty ut_user...
 			 */
-			if (ut.ut_name[0] == 0)
+			if (ut.ut_user[0] == 0)
 				ut.ut_type = DEAD_PROCESS;
 
 			/*
 			 * Clock changes.
 			 */
-			if (strcmp(ut.ut_name, "date") == 0) {
+			if (strcmp(ut.ut_user, "date") == 0) {
 				if (ut.ut_line[0] == '|')
 					ut.ut_type = OLD_TIME;
 				if (ut.ut_line[0] == '{')
@@ -716,40 +698,40 @@ int main(int argc, char **argv)
 #endif
 		switch (ut.ut_type) {
 		case SHUTDOWN_TIME:
-			if (extended) {
+			if (ctl->extended) {
 				strcpy(ut.ut_line, "system down");
-				quit = list(&ut, lastboot, R_NORMAL);
+				quit = list(ctl, &ut, lastboot, R_NORMAL);
 			}
-			lastdown = lastrch = ut.ut_time;
+			lastdown = lastrch = ut.UL_UT_TIME;
 			down = 1;
 			break;
 		case OLD_TIME:
 		case NEW_TIME:
-			if (extended) {
+			if (ctl->extended) {
 				strcpy(ut.ut_line,
 				ut.ut_type == NEW_TIME ? "new time" :
 					"old time");
-				quit = list(&ut, lastdown, R_TIMECHANGE);
+				quit = list(ctl, &ut, lastdown, R_TIMECHANGE);
 			}
 			break;
 		case BOOT_TIME:
 			strcpy(ut.ut_line, "system boot");
-			quit = list(&ut, lastdown, R_REBOOT);
-			lastboot = ut.ut_time;
+			quit = list(ctl, &ut, lastdown, R_REBOOT);
+			lastboot = ut.UL_UT_TIME;
 			down = 1;
 			break;
 		case RUN_LVL:
 			x = ut.ut_pid & 255;
-			if (extended) {
+			if (ctl->extended) {
 				sprintf(ut.ut_line, "(to lvl %c)", x);
-				quit = list(&ut, lastrch, R_NORMAL);
+				quit = list(ctl, &ut, lastrch, R_NORMAL);
 			}
 			if (x == '0' || x == '6') {
-				lastdown = ut.ut_time;
+				lastdown = ut.UL_UT_TIME;
 				down = 1;
 				ut.ut_type = SHUTDOWN_TIME;
 			}
-			lastrch = ut.ut_time;
+			lastrch = ut.UL_UT_TIME;
 			break;
 
 		case USER_PROCESS:
@@ -765,8 +747,7 @@ int main(int argc, char **argv)
 				    UT_LINESIZE) == 0) {
 					/* Show it */
 					if (c == 0) {
-						quit = list(&ut, p->ut.ut_time,
-							R_NORMAL);
+						quit = list(ctl, &ut, p->ut.UL_UT_TIME, R_NORMAL);
 						c = 1;
 					}
 					if (p->next) p->next->prev = p->prev;
@@ -782,7 +763,7 @@ int main(int argc, char **argv)
 			 * logged in, or missing logout record.
 			 */
 			if (c == 0) {
-				if (lastboot == 0) {
+				if (!lastboot) {
 					c = R_NOW;
 					/* Is process still alive? */
 					if (ut.ut_pid > 0 &&
@@ -791,7 +772,7 @@ int main(int argc, char **argv)
 						c = R_PHANTOM;
 				} else
 					c = whydown;
-				quit = list(&ut, lastboot, c);
+				quit = list(ctl, &ut, lastboot, c);
 			}
 			/* FALLTHRU */
 
@@ -810,6 +791,15 @@ int main(int argc, char **argv)
 			utmplist = p;
 			break;
 
+		case EMPTY:
+		case INIT_PROCESS:
+		case LOGIN_PROCESS:
+		case ACCOUNTING:
+			/* ignored ut_types */
+			break;
+
+		default:
+			warnx("unrecogized ut_type: %d", ut.ut_type);
 		}
 
 		/*
@@ -817,7 +807,7 @@ int main(int argc, char **argv)
 		 * the entire current utmplist.
 		 */
 		if (down) {
-			lastboot = ut.ut_time;
+			lastboot = ut.UL_UT_TIME;
 			whydown = (ut.ut_type == SHUTDOWN_TIME) ? R_DOWN : R_CRASH;
 			for (p = utmplist; p; p = next) {
 				next = p->next;
@@ -828,8 +818,152 @@ int main(int argc, char **argv)
 		}
 	}
 
-	printf(_("\n%s begins %s"), basename(ufile), ctime(&begintime));
-
+	printf(_("\n%s begins %s"), basename(ctl->altv[ctl->alti]), ctime(&begintime));
 	fclose(fp);
+	for (p = utmplist; p; p = next) {
+		next = p->next;
+		free(p);
+	}
+}
+
+int main(int argc, char **argv)
+{
+	struct last_control ctl = {
+		.showhost = TRUE,
+		.name_len = LAST_LOGIN_LEN,
+		.time_fmt = LAST_TIMEFTM_SHORT_CTIME,
+		.domain_len = LAST_DOMAIN_LEN
+	};
+	int c;
+	usec_t p;
+
+	enum {
+		OPT_TIME_FORMAT = CHAR_MAX + 1
+	};
+	static const struct option long_opts[] = {
+	      { "limit",	required_argument, NULL, 'n' },
+	      { "help",	no_argument,       NULL, 'h' },
+	      { "file",       required_argument, NULL, 'f' },
+	      { "nohostname", no_argument,       NULL, 'R' },
+	      { "version",    no_argument,       NULL, 'V' },
+	      { "hostlast",   no_argument,       NULL, 'a' },
+	      { "since",      required_argument, NULL, 's' },
+	      { "until",      required_argument, NULL, 't' },
+	      { "present",    required_argument, NULL, 'p' },
+	      { "system",     no_argument,       NULL, 'x' },
+	      { "dns",        no_argument,       NULL, 'd' },
+	      { "ip",         no_argument,       NULL, 'i' },
+	      { "fulltimes",  no_argument,       NULL, 'F' },
+	      { "fullnames",  no_argument,       NULL, 'w' },
+	      { "time-format", required_argument, NULL, OPT_TIME_FORMAT },
+	      { NULL, 0, NULL, 0 }
+	};
+	static const ul_excl_t excl[] = {	/* rows and cols in in ASCII order */
+		{ 'F', OPT_TIME_FORMAT },	/* fulltime, time-format */
+		{ 0 }
+	};
+	int excl_st[ARRAY_SIZE(excl)] = UL_EXCL_STATUS_INIT;
+
+	setlocale(LC_ALL, "");
+	bindtextdomain(PACKAGE, LOCALEDIR);
+	textdomain(PACKAGE);
+	atexit(close_stdout);
+
+	while ((c = getopt_long(argc, argv,
+			"hVf:n:RxadFit:p:s:0123456789w", long_opts, NULL)) != -1) {
+
+		err_exclusive_options(c, long_opts, excl, excl_st);
+
+		switch(c) {
+		case 'h':
+			usage(stdout);
+			break;
+		case 'V':
+			printf(UTIL_LINUX_VERSION);
+			return EXIT_SUCCESS;
+		case 'R':
+			ctl.showhost = 0;
+			break;
+		case 'x':
+			ctl.extended = 1;
+			break;
+		case 'n':
+			ctl.maxrecs = strtos32_or_err(optarg, _("failed to parse number"));
+			break;
+		case 'f':
+			if (!ctl.altv)
+				ctl.altv = xmalloc(sizeof(char *) * argc);
+			ctl.altv[ctl.altc++] = xstrdup(optarg);
+			break;
+		case 'd':
+			ctl.usedns = 1;
+			break;
+		case 'i':
+			ctl.useip = 1;
+			break;
+		case 'a':
+			ctl.altlist = 1;
+			break;
+		case 'F':
+			ctl.fulltime = 1;
+			ctl.time_fmt = LAST_TIMEFTM_FULL_CTIME;
+			break;
+		case 'p':
+			if (parse_timestamp(optarg, &p) < 0)
+				errx(EXIT_FAILURE, _("invalid time value \"%s\""), optarg);
+			ctl.present = (time_t) (p / 1000000);
+			break;
+		case 's':
+			if (parse_timestamp(optarg, &p) < 0)
+				errx(EXIT_FAILURE, _("invalid time value \"%s\""), optarg);
+			ctl.since = (time_t) (p / 1000000);
+			break;
+		case 't':
+			if (parse_timestamp(optarg, &p) < 0)
+				errx(EXIT_FAILURE, _("invalid time value \"%s\""), optarg);
+			ctl.until = (time_t) (p / 1000000);
+			break;
+		case 'w':
+			if (ctl.name_len < UT_NAMESIZE)
+				ctl.name_len = UT_NAMESIZE;
+			if (ctl.domain_len < UT_HOSTSIZE)
+				ctl.domain_len = UT_HOSTSIZE;
+			break;
+		case '0': case '1': case '2': case '3': case '4':
+		case '5': case '6': case '7': case '8': case '9':
+			ctl.maxrecs = 10 * ctl.maxrecs + c - '0';
+			break;
+		case OPT_TIME_FORMAT:
+			ctl.time_fmt = which_time_format(optarg);
+			if (ctl.time_fmt == LAST_TIMEFTM_ISO8601)
+				ctl.fulltime = 1;
+			break;
+		default:
+			usage(stderr);
+			break;
+		}
+	}
+
+	if (optind < argc)
+		ctl.show = argv + optind;
+
+	/*
+	 * Which file do we want to read?
+	 */
+	ctl.lastb = strcmp(program_invocation_short_name, "lastb") == 0 ? 1 : 0;
+	if (!ctl.altc) {
+		ctl.altv = xmalloc(sizeof(char *));
+		if (ctl.lastb)
+			ctl.altv[0] = xstrdup(_PATH_BTMP);
+		else
+			ctl.altv[0] = xstrdup(_PATH_WTMP);
+		ctl.altc++;
+	}
+
+	for (; ctl.alti < ctl.altc; ctl.alti++) {
+		process_wtmp_file(&ctl);
+		free(ctl.altv[ctl.alti]);
+	}
+	free(ctl.altv);
 	return EXIT_SUCCESS;
 }

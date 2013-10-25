@@ -31,6 +31,8 @@
 #define	_PATH_HUSHLOGIN		".hushlogin"
 #define	_PATH_HUSHLOGINS	"/etc/hushlogins"
 
+#define _PATH_NOLOGIN_TXT	"/etc/nologin.txt"
+
 #ifndef _PATH_MAILDIR
 #define	_PATH_MAILDIR		"/var/spool/mail"
 #endif
@@ -63,6 +65,7 @@
 
 /* used in term-utils/agetty.c */
 #define _PATH_ISSUE		"/etc/issue"
+#define _PATH_OS_RELEASE	"/etc/os-release"
 #define _PATH_NUMLOCK_ON	_PATH_LOCALSTATEDIR "/numlock-on"
 
 #define _PATH_LOGINDEFS		"/etc/login.defs"

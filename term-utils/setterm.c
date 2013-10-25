@@ -100,16 +100,17 @@
 #include <termios.h>
 #include <string.h>
 #include <fcntl.h>
+
 #ifndef NCURSES_CONST
 #define NCURSES_CONST const	/* define before including term.h */
 #endif
-#include <term.h>
-
 #ifdef HAVE_NCURSES_H
 #include <ncurses.h>
 #elif defined(HAVE_NCURSES_NCURSES_H)
 #include <ncurses/ncurses.h>
 #endif
+/* must include after ncurses.h */
+#include <term.h>
 
 #include <sys/param.h>		/* for MAXPATHLEN */
 #include <sys/ioctl.h>
@@ -123,7 +124,7 @@
 #include "nls.h"
 #include "closestream.h"
 
-#if __GNU_LIBRARY__ < 5
+#if defined(__GNU_LIBRARY__) && __GNU_LIBRARY__ < 5
 #ifndef __alpha__
 # include <linux/unistd.h>
 #define __NR_klogctl __NR_syslog

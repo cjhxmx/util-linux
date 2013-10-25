@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <assert.h>
 
 #include "c.h"
 #include "nls.h"

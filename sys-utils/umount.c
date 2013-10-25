@@ -198,6 +198,12 @@ static int mk_exit_code(struct libmnt_context *cxt, int rc)
 		/*
 		 * libmount errors (extra library checks)
 		 */
+		if (rc == -EPERM && !mnt_context_tab_applied(cxt)) {
+			/* failed to evaluate permissions because not found
+			 * relevant entry in mtab */
+			warnx(_("%s: not mounted"), tgt);
+			return MOUNT_EX_USAGE;
+		}
 		return handle_generic_errors(rc, _("%s: umount failed"), tgt);
 
 	} else if (mnt_context_get_syscall_errno(cxt) == 0) {
@@ -317,7 +323,7 @@ static struct libmnt_table *new_mountinfo(struct libmnt_context *cxt)
 
 	if (mnt_table_parse_file(tb, _PATH_PROC_MOUNTINFO)) {
 		warn(_("failed to parse %s"), _PATH_PROC_MOUNTINFO);
-		mnt_free_table(tb);
+		mnt_unref_table(tb);
 		tb = NULL;
 	}
 
@@ -400,7 +406,7 @@ static int umount_recursive(struct libmnt_context *cxt, const char *spec)
 				_("%s: not found"), spec);
 	}
 
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 	return rc;
 }
 
@@ -459,7 +465,7 @@ static int umount_alltargets(struct libmnt_context *cxt, const char *spec, int r
 	}
 
 	mnt_free_iter(itr);
-	mnt_free_table(tb);
+	mnt_unref_table(tb);
 
 	return rc;
 }

@@ -21,6 +21,7 @@
 #include "libfdisk.h"
 
 #include "nls.h"		/* temporary before dialog API will be implamented */
+#include "tt.h"
 
 /* features */
 #define CONFIG_LIBFDISK_ASSERT
@@ -48,6 +49,7 @@
 #define FDISK_DEBUG_GEOMETRY    (1 << 4)
 #define FDISK_DEBUG_LABEL       (1 << 5)
 #define FDISK_DEBUG_ASK         (1 << 6)
+#define FDISK_DEBUG_FRONTEND	(1 << 7)
 #define FDISK_DEBUG_ALL		0xFFFF
 
 # define ON_DBG(m, x)	do { \
@@ -144,6 +146,16 @@ struct fdisk_label_operations {
 	int (*verify)(struct fdisk_context *cxt);
 	/* create new disk label */
 	int (*create)(struct fdisk_context *cxt);
+	/* list partition table */
+	int (*list)(struct fdisk_context *cxt);
+	/* returns offset and size of the 'n' part of the PT */
+	int (*locate)(struct fdisk_context *cxt, int n, const char **name, off_t *offset, size_t *size);
+
+	/* get disk label ID */
+	int (*get_id)(struct fdisk_context *cxt, char **id);
+	/* set disk label ID */
+	int (*set_id)(struct fdisk_context *cxt);
+
 	/* new partition */
 	int (*part_add)(struct fdisk_context *cxt,
 						size_t partnum,
@@ -190,21 +202,23 @@ struct fdisk_label {
 
 	int			flags;		/* FDISK_LABEL_FL_* flags */
 
-	unsigned int		changed:1;	/* label has been modified */
+	unsigned int		changed:1,	/* label has been modified */
+				disabled:1;	/* this driver is disabled at all */
 
 	const struct fdisk_label_operations *op;
 };
 
 /* label driver flags */
 enum {
-	FDISK_LABEL_FL_ADDPART_NOPARTNO = (1 << 1)
+	FDISK_LABEL_FL_ADDPART_NOPARTNO = (1 << 1),
+	FDISK_LABEL_FL_REQUIRE_GEOMETRY = (1 << 2),
+	FDISK_LABEL_FL_INCHARS_PARTNO   = (1 << 3)
 };
 
 /* label allocators */
 extern struct fdisk_label *fdisk_new_gpt_label(struct fdisk_context *cxt);
 extern struct fdisk_label *fdisk_new_dos_label(struct fdisk_context *cxt);
 extern struct fdisk_label *fdisk_new_bsd_label(struct fdisk_context *cxt);
-extern struct fdisk_label *fdisk_new_mac_label(struct fdisk_context *cxt);
 extern struct fdisk_label *fdisk_new_sgi_label(struct fdisk_context *cxt);
 extern struct fdisk_label *fdisk_new_sun_label(struct fdisk_context *cxt);
 
@@ -215,6 +229,7 @@ extern struct fdisk_label *fdisk_new_sun_label(struct fdisk_context *cxt);
 struct fdisk_ask {
 	int		type;		/* FDISK_ASKTYPE_* */
 	char		*query;
+	unsigned int	flags;
 
 	union {
 		/* FDISK_ASKTYPE_{NUMBER,OFFSET} */
@@ -226,7 +241,8 @@ struct fdisk_ask {
 			uint64_t	base;		/* for relative results */
 			uint64_t	unit;		/* unit for offsets */
 			const char	*range;		/* by library generated list */
-			unsigned int	relative:1;
+			unsigned int	relative :1,
+					inchars  :1;
 		} num;
 		/* FDISK_ASKTYPE_{WARN,WARNX,..} */
 		struct ask_print {
@@ -237,6 +253,12 @@ struct fdisk_ask {
 		struct ask_yesno {
 			int		result;		/* TRUE or FALSE */
 		} yesno;
+		/* FDISK_ASKTYPE_STRING */
+		struct ask_string {
+			char		*result;	/* allocated */
+		} str;
+		/* FDISK_ASKTYPE_TABLE, see include/tt.h  */
+		struct tt *table;
 	} data;
 };
 
@@ -253,15 +275,22 @@ struct fdisk_context {
 	unsigned long sector_size;	/* logical size */
 	unsigned long alignment_offset;
 
-	int display_in_cyl_units;	/* for obscure labels */
+	unsigned int display_in_cyl_units : 1,	/* for obscure labels */
+		     display_details : 1,	/* expert display mode */
+		     listonly : 1;		/* list partition, nothing else */
 
 	/* alignment */
 	unsigned long grain;		/* alignment unit */
 	sector_t first_lba;		/* recommended begin of the first partition */
 
 	/* geometry */
-	sector_t total_sectors; /* in logical sectors */
+	sector_t total_sectors;	/* in logical sectors */
 	struct fdisk_geometry geom;
+
+	/* user setting to overwrite device default */
+	struct fdisk_geometry user_geom;
+	unsigned long user_pyh_sector;
+	unsigned long user_log_sector;
 
 	struct fdisk_label *label;	/* current label, pointer to labels[] */
 
@@ -279,7 +308,16 @@ struct fdisk_context {
 extern int __fdisk_context_switch_label(struct fdisk_context *cxt,
 				    struct fdisk_label *lb);
 
+extern int fdisk_context_use_cylinders(struct fdisk_context *cxt);
+extern int fdisk_context_display_details(struct fdisk_context *cxt);
+extern int fdisk_context_enable_listonly(struct fdisk_context *cxt, int enable);
+extern int fdisk_context_listonly(struct fdisk_context *cxt);
+
+
 /* alignment.c */
+extern sector_t fdisk_scround(struct fdisk_context *cxt, sector_t num);
+extern sector_t fdisk_cround(struct fdisk_context *cxt, sector_t num);
+
 extern sector_t fdisk_topology_get_first_lba(struct fdisk_context *cxt);
 extern unsigned long fdisk_topology_get_grain(struct fdisk_context *cxt);
 
@@ -296,7 +334,6 @@ extern sector_t fdisk_align_lba_in_range(struct fdisk_context *cxt, sector_t lba
 					 sector_t start, sector_t stop);
 
 
-extern int fdisk_override_sector_size(struct fdisk_context *cxt, sector_t s);
 extern int fdisk_override_geometry(struct fdisk_context *cxt,
 		            unsigned int cylinders, unsigned int heads,
                             unsigned int sectors);
@@ -304,19 +341,28 @@ extern int fdisk_override_geometry(struct fdisk_context *cxt,
 extern int fdisk_discover_geometry(struct fdisk_context *cxt);
 extern int fdisk_discover_topology(struct fdisk_context *cxt);
 
+extern int fdisk_apply_user_device_properties(struct fdisk_context *cxt);
+extern void fdisk_zeroize_device_properties(struct fdisk_context *cxt);
+
 /* utils.c */
 extern void fdisk_zeroize_firstsector(struct fdisk_context *cxt);
 extern int fdisk_read_firstsector(struct fdisk_context *cxt);
+extern char *fdisk_partname(const char *dev, size_t partno);
 
 /* label.c */
 extern int fdisk_probe_labels(struct fdisk_context *cxt);
 extern void fdisk_deinit_label(struct fdisk_label *lb);
 
 
-/* gpt.c -- temporary bypass library API... */
-extern void gpt_list_table(struct fdisk_context *cxt, int xtra);
-
 /* ask.c */
 extern int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew);
+
+extern struct tt *fdisk_ask_get_table(struct fdisk_ask *ask);
+extern int fdisk_print_table(struct fdisk_context *cxt, struct tt *tb);
+
+extern int fdisk_info_new_partition(
+			struct fdisk_context *cxt,
+			int num, sector_t start, sector_t stop,
+			struct fdisk_parttype *t);
 
 #endif /* _LIBFDISK_PRIVATE_H */

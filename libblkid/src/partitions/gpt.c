@@ -20,7 +20,6 @@
 
 #include "partitions.h"
 #include "crc32.h"
-#include "dos.h"
 
 #define GPT_PRIMARY_LBA	1
 
@@ -170,13 +169,11 @@ static int is_pmbr_valid(blkid_probe pr)
 	if (!data)
 		goto failed;
 
-	if (!is_valid_mbr_signature(data))
+	if (!mbr_is_valid_magic(data))
 		goto failed;
 
-	p = (struct dos_partition *) (data + BLKID_MSDOS_PT_OFFSET);
-
-	for (i = 0; i < 4; i++, p++) {
-		if (p->sys_type == BLKID_GPT_PARTITION)
+	for (i = 0, p = mbr_get_partition(data, 0); i < 4; i++, p++) {
+		if (p->sys_ind == MBR_GPT_PARTITION)
 			goto ok;
 	}
 failed:

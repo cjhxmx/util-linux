@@ -216,6 +216,9 @@ extern struct libmnt_cache *mnt_new_cache(void)
 			__ul_attribute__((warn_unused_result));
 extern void mnt_free_cache(struct libmnt_cache *cache);
 
+extern void mnt_ref_cache(struct libmnt_cache *cache);
+extern void mnt_unref_cache(struct libmnt_cache *cache);
+
 extern int mnt_cache_read_tags(struct libmnt_cache *cache, const char *devname);
 
 extern int mnt_cache_device_has_tag(struct libmnt_cache *cache,
@@ -302,6 +305,8 @@ extern int mnt_lock_block_signals(struct libmnt_lock *ml, int enable);
 extern struct libmnt_fs *mnt_new_fs(void)
 			__ul_attribute__((warn_unused_result));
 extern void mnt_free_fs(struct libmnt_fs *fs);
+extern void mnt_ref_fs(struct libmnt_fs *fs);
+extern void mnt_unref_fs(struct libmnt_fs *fs);
 
 extern void mnt_reset_fs(struct libmnt_fs *fs);
 extern struct libmnt_fs *mnt_copy_fs(struct libmnt_fs *dest,
@@ -410,10 +415,18 @@ extern struct libmnt_table *mnt_new_table(void)
 			__ul_attribute__((warn_unused_result));
 extern void mnt_free_table(struct libmnt_table *tb);
 
+extern void mnt_ref_table(struct libmnt_table *tb);
+extern void mnt_unref_table(struct libmnt_table *tb);
+
 extern int mnt_reset_table(struct libmnt_table *tb);
 extern int mnt_table_get_nents(struct libmnt_table *tb);
+extern int mnt_table_is_empty(struct libmnt_table *tb);
+
+extern int mnt_table_set_userdata(struct libmnt_table *tb, void *data);
+extern void *mnt_table_get_userdata(struct libmnt_table *tb);
 
 extern void mnt_table_enable_comments(struct libmnt_table *tb, int enable);
+extern int mnt_table_with_comments(struct libmnt_table *tb);
 extern const char *mnt_table_get_intro_comment(struct libmnt_table *tb);
 extern int mnt_table_set_intro_comment(struct libmnt_table *tb, const char *comm);
 extern int mnt_table_append_intro_comment(struct libmnt_table *tb, const char *comm);
@@ -425,6 +438,8 @@ extern int mnt_table_set_cache(struct libmnt_table *tb, struct libmnt_cache *mpc
 extern struct libmnt_cache *mnt_table_get_cache(struct libmnt_table *tb);
 extern int mnt_table_add_fs(struct libmnt_table *tb, struct libmnt_fs *fs);
 extern int mnt_table_remove_fs(struct libmnt_table *tb, struct libmnt_fs *fs);
+extern int mnt_table_first_fs(struct libmnt_table *tb, struct libmnt_fs **fs);
+extern int mnt_table_last_fs(struct libmnt_table *tb, struct libmnt_fs **fs);
 extern int mnt_table_next_fs(struct libmnt_table *tb, struct libmnt_iter *itr,
 			     struct libmnt_fs **fs);
 extern int mnt_table_next_child_fs(struct libmnt_table *tb, struct libmnt_iter *itr,
@@ -593,6 +608,10 @@ extern int mnt_context_set_fstype(struct libmnt_context *cxt, const char *fstype
 extern const char *mnt_context_get_source(struct libmnt_context *cxt);
 extern const char *mnt_context_get_target(struct libmnt_context *cxt);
 extern const char *mnt_context_get_fstype(struct libmnt_context *cxt);
+
+extern void *mnt_context_get_mtab_userdata(struct libmnt_context *cxt);
+extern void *mnt_context_get_fstab_userdata(struct libmnt_context *cxt);
+extern void *mnt_context_get_fs_userdata(struct libmnt_context *cxt);
 
 extern int mnt_context_set_options(struct libmnt_context *cxt, const char *optstr);
 extern int mnt_context_append_options(struct libmnt_context *cxt, const char *optstr);

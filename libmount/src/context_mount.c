@@ -21,6 +21,7 @@
 
 #include "linux_version.h"
 #include "mountP.h"
+#include "strutils.h"
 
 /*
  * Kernel supports only one MS_PROPAGATION flag change by one mount(2) syscall,
@@ -361,7 +362,7 @@ static int evaluate_permissions(struct libmnt_context *cxt)
 		/*
 		 * user mount
 		 */
-		if (!(cxt->flags & MNT_FL_TAB_APPLIED))
+		if (!mnt_context_tab_applied(cxt))
 		{
 			DBG(CXT, mnt_debug_h(cxt, "perms: fstab not applied, ignore user mount"));
 			return -EPERM;
@@ -973,11 +974,6 @@ int mnt_context_mount(struct libmnt_context *cxt)
 		rc = mnt_context_prepare_update(cxt);
 	if (!rc)
 		rc = mnt_context_do_mount(cxt);
-
-	/* TODO: if a mtab update is expected, then check if the
-	 * target is really mounted read-write to avoid 'ro' in
-	 * mtab and 'rw' in /proc/mounts.
-	 */
 	if (!rc)
 		rc = mnt_context_update_tabs(cxt);
 	return rc;

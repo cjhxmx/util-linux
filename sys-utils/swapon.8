@@ -42,41 +42,13 @@
 .SH NAME
 swapon, swapoff \- enable/disable devices and files for paging and swapping
 .SH SYNOPSIS
-Get info:
-.br
-.in +5
-.B swapon \-s
-.RB [ \-h ]
-.RB [ \-V ]
-.sp
-.in -5
-Enable/disable:
-.br
-.in +5
 .B swapon
-.RB [ \-d ]
-.RB [ \-f ]
-.RB [ \-p
-.IR priority ]
-.RB [ \-v ]
-.IR specialfile ...
+[ options ]
+.RI [ specialfile... ]
 .br
 .B swapoff
-.RB [ \-v ]
-.IR specialfile ...
-.sp
-.in -5
-Enable/disable all:
-.br
-.in +5
-.B swapon \-a
-.RB [ \-e ]
-.RB [ \-f ]
-.RB [ \-v ]
-.br
-.B swapoff \-a
-.RB [ \-v ]
-.in -5
+.RB [ \-va ]
+.RI [ specialfile... ]
 .SH DESCRIPTION
 .B swapon
 is used to specify devices on which paging and swapping are to take place.
@@ -112,15 +84,25 @@ All devices marked as ``swap'' in
 are made available, except for those with the ``noauto'' option.
 Devices that are already being used as swap are silently skipped.
 .TP
-.B "\-d, \-\-discard"
-Discard freed swap pages before they are reused, if the swap
-device supports the discard or trim operation.  This may improve
-performance on some Solid State Devices, but often it does not.
+.B "\-d, \-\-discard\fR [=\fIpolicy\fR]"
+Enable swap discards, if the swap backing device supports the discard or
+trim operation. This may improve performance on some Solid State Devices,
+but often it does not. The option allows one to select between two
+available swap discard policies:
+.BI \-\-discard=once
+to perform a single-time discard operation for the whole swap area at swapon;
+or
+.BI \-\-discard=pages
+to discard freed swap pages before they are reused, while swapping.
+If no policy is selected, the default behavior is to enable both discard types.
 The
 .I /etc/fstab
-mount option
-.BI discard
-may be also used to enable discard flag.
+mount options
+.BI discard,
+.BI discard=once,
+or
+.BI discard=pages
+may be also used to enable discard flags.
 .TP
 .B "\-e, \-\-ifexists"
 Silently skip devices that do not exist.
@@ -138,7 +120,7 @@ match that of the current running kernel.
 initializes the whole device and does not check for bad blocks.
 .TP
 .B \-h, \-\-help
-Provide help.
+Display help text and exit.
 .TP
 .B "\-L \fIlabel\fP"
 Use the partition that has the specified
@@ -165,7 +147,7 @@ When priority is not defined it defaults to \-1.
 Display swap usage summary by device. Equivalent to "cat /proc/swaps".
 Not available before Linux 2.1.25.
 .TP
-\fB\-\-show\fR [\fIcolumn,column\fR]
+\fB\-\-show\fR [\fIcolumn\fR, ...]
 Display definable device table similar to
 .B \-\-summary
 output.  See \-\-help output for
@@ -194,7 +176,7 @@ Use the partition that has the specified
 Be verbose.
 .TP
 .B "\-V, \-\-version"
-Display version.
+Display version information and exit.
 .SH NOTES
 You should not use
 .B swapon

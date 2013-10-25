@@ -3,6 +3,8 @@
 libmnt_cache
 mnt_new_cache
 mnt_free_cache
+mnt_ref_cache
+mnt_unref_cache
 mnt_cache_device_has_tag
 mnt_cache_find_tag_value
 mnt_cache_read_tags
@@ -36,11 +38,14 @@ mnt_context_enable_verbose
 mnt_context_get_cache
 mnt_context_get_fs
 mnt_context_get_fstab
+mnt_context_get_fstab_userdata
 mnt_context_get_fstype
+mnt_context_get_fs_userdata
 mnt_context_get_helper_status
 mnt_context_get_lock
 mnt_context_get_mflags
 mnt_context_get_mtab
+mnt_context_get_mtab_userdata
 mnt_context_get_options
 mnt_context_get_optsmode
 mnt_context_get_source
@@ -167,6 +172,8 @@ libmnt_fs
 mnt_copy_fs
 mnt_free_fs
 mnt_free_mntent
+mnt_ref_fs
+mnt_unref_fs
 mnt_fs_append_attributes
 mnt_fs_append_comment
 mnt_fs_append_options
@@ -282,6 +289,8 @@ libmnt_table
 mnt_free_table
 mnt_new_table
 mnt_reset_table
+mnt_ref_table
+mnt_unref_table
 mnt_new_table_from_dir
 mnt_new_table_from_file
 mnt_table_add_fs
@@ -296,12 +305,16 @@ mnt_table_find_source
 mnt_table_find_srcpath
 mnt_table_find_tag
 mnt_table_find_target
+mnt_table_first_fs
 mnt_table_get_cache
 mnt_table_get_intro_comment
 mnt_table_get_nents
 mnt_table_get_root_fs
 mnt_table_get_trailing_comment
+mnt_table_get_userdata
+mnt_table_is_empty
 mnt_table_is_fs_mounted
+mnt_table_last_fs
 mnt_table_next_child_fs
 mnt_table_next_fs
 mnt_table_parse_dir
@@ -316,6 +329,8 @@ mnt_table_set_intro_comment
 mnt_table_set_iter
 mnt_table_set_parser_errcb
 mnt_table_set_trailing_comment
+mnt_table_set_userdata
+mnt_table_with_comments
 </SECTION>
 
 <SECTION>

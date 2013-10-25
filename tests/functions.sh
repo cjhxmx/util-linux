@@ -242,6 +242,20 @@ function ts_init_suid {
 	chmod u+s $PROG &> /dev/null
 }
 
+function ts_init_py {
+	LIBNAME="$1"
+
+	[ -f "$TS_TOPDIR/../py${LIBNAME}.la" ] || ts_skip "py${LIBNAME} not compiled"
+
+	export LD_LIBRARY_PATH="$TS_TOPDIR/../.libs"
+	export PYTHONPATH="$TS_TOPDIR/../$LIBNAME/python:$TS_TOPDIR/../.libs"
+
+	export PYTHON_VERSION=$(awk '/^PYTHON_VERSION/ { print $3 }' $top_builddir/Makefile)
+	export PYTHON_MAJOR_VERSION=$(echo $PYTHON_VERSION | sed 's/\..*//')
+
+	export PYTHON="python${PYTHON_MAJOR_VERSION}"
+}
+
 function ts_valgrind {
 	if [ -z "$TS_VALGRIND_CMD" ]; then
 		$*
@@ -461,16 +475,19 @@ s/# <!-- util-linux.*-->//;
 }
 
 function ts_fdisk_clean {
-	local DEVNAME=$(basename "$1")
+	local DEVNAME=$1
 
 	# remove non comparable parts of fdisk output
 	if [ x"${DEVNAME}" != x"" ]; then
-	       sed -i -e "s/\/dev\/${DEVNAME}/\/dev\/.../g" $TS_OUTPUT
+	       sed -i -e "s:${DEVNAME}:<removed>:g" $TS_OUTPUT
 	fi
 
-	sed -i -e 's/Disk identifier:.*//g' \
-	       -e 's/Building a new.*//g' \
-	       -e 's/Welcome to fdisk.*//g' \
+	sed -i -e 's/Disk identifier:.*/Disk identifier: <removed>/g' \
+	       -e 's/Created a new.*/Created a new <removed>./g' \
+	       -e 's/^Device[[:blank:]]*Start/Device             Start/g' \
+	       -e 's/^Device[[:blank:]]*Boot/Device     Boot/g' \
+	       -e 's/^Device[[:blank:]]*Flag/Device     Flag/g' \
+	       -e 's/Welcome to fdisk.*/Welcome to fdisk <removed>./g' \
 	       $TS_OUTPUT
 }
 
@@ -483,7 +500,7 @@ function ts_scsi_debug_init {
 	modprobe scsi_debug $*
 	[ "$?" == 0 ] || ts_die "Cannot init device"
 
-	DEVNAME=$(grep scsi_debug /sys/block/*/device/model | awk -F '/' '{print $4}')
+	DEVNAME=$(grep --with-filename scsi_debug /sys/block/*/device/model | awk -F '/' '{print $4}')
 	[ "x${DEVNAME}" == "x" ] && ts_die "Cannot find device"
 
 	DEVICE="/dev/${DEVNAME}"

@@ -23,37 +23,6 @@
 #include "env.h"
 #include "match.h"
 
-int endswith(const char *s, const char *sx)
-{
-	ssize_t off;
-
-	assert(s);
-	assert(sx);
-
-	off = strlen(s);
-	if (!off)
-		return 0;
-	off -= strlen(sx);
-	if (off < 0)
-		return 0;
-
-        return !strcmp(s + off, sx);
-}
-
-int startswith(const char *s, const char *sx)
-{
-	size_t off;
-
-	assert(s);
-	assert(sx);
-
-	off = strlen(sx);
-	if (!off)
-		return 0;
-
-        return !strncmp(s, sx, off);
-}
-
 int append_string(char **a, const char *b)
 {
 	size_t al, bl;
@@ -69,7 +38,7 @@ int append_string(char **a, const char *b)
 	}
 
 	al = strlen(*a);
-	bl = b ? strlen(b) : 0;
+	bl = strlen(b);
 
 	tmp = realloc(*a, al + bl + 1);
 	if (!tmp)
@@ -196,7 +165,7 @@ int mnt_chdir_to_parent(const char *target, char **filename)
 		if (!last || !*last)
 			memcpy(*filename, ".", 2);
 		else
-			memcpy(*filename, last, strlen(last) + 1);
+			memmove(*filename, last, strlen(last) + 1);
 	} else
 		free(buf);
 	return 0;
@@ -880,6 +849,8 @@ int mnt_open_uniq_filename(const char *filename, char **name)
 	oldmode = umask(S_IRGRP|S_IWGRP|S_IXGRP|
 			S_IROTH|S_IWOTH|S_IXOTH);
 	fd = mkostemp(n, O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC);
+	if (fd < 0)
+		fd = -errno;
 	umask(oldmode);
 
 	if (fd >= 0 && name)
@@ -887,7 +858,7 @@ int mnt_open_uniq_filename(const char *filename, char **name)
 	else
 		free(n);
 
-	return fd < 0 ? -errno : fd;
+	return fd;
 }
 
 /**

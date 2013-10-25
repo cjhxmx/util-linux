@@ -304,7 +304,7 @@ static int is_irrotational_disk(dev_t disk)
 	rc = fscanf(f, "%d", &x);
 	if (rc != 1) {
 		if (ferror(f))
-			warn(_("failed to read: %s"), path);
+			warn(_("cannot read %s"), path);
 		else
 			warnx(_("parse error: %s"), path);
 	}
@@ -370,6 +370,7 @@ static void free_instance(struct fsck_instance *i)
 	if (lockdisk)
 		unlock_disk(i);
 	free(i->prog);
+	mnt_unref_fs(i->fs);
 	free(i);
 	return;
 }
@@ -379,10 +380,12 @@ static struct libmnt_fs *add_dummy_fs(const char *device)
 	struct libmnt_fs *fs = mnt_new_fs();
 
 	if (fs && mnt_fs_set_source(fs, device) == 0 &&
-		  mnt_table_add_fs(fstab, fs) == 0)
+				  mnt_table_add_fs(fstab, fs) == 0) {
+		mnt_unref_fs(fs);
 		return fs;
+	}
 
-	mnt_free_fs(fs);
+	mnt_unref_fs(fs);
 	err(FSCK_EX_ERROR, _("failed to setup description for %s"), device);
 }
 
@@ -437,10 +440,14 @@ static void load_fs_info(void)
 	if (mnt_table_parse_fstab(fstab, path)) {
 		if (!path)
 			path = mnt_get_fstab_path();
-		if (errno)
-			warn(_("%s: failed to parse fstab"), path);
-		else
-			warnx(_("%s: failed to parse fstab"), path);
+
+		/* don't print error when there is no fstab at all */
+		if (access(path, F_OK) == 0) {
+			if (errno)
+				warn(_("%s: failed to parse fstab"), path);
+			else
+				warnx(_("%s: failed to parse fstab"), path);
+		}
 	}
 }
 
@@ -582,7 +589,7 @@ static int execute(const char *type, struct libmnt_fs *fs, int interactive)
 	s = find_fsck(prog);
 	if (s == NULL) {
 		warnx(_("%s: not found"), prog);
-		free(inst);
+		free_instance(inst);
 		return ENOENT;
 	}
 
@@ -597,6 +604,7 @@ static int execute(const char *type, struct libmnt_fs *fs, int interactive)
 		printf("\n");
 	}
 
+	mnt_ref_fs(fs);
 	inst->fs = fs;
 	inst->lock = -1;
 
@@ -608,7 +616,7 @@ static int execute(const char *type, struct libmnt_fs *fs, int interactive)
 		pid = -1;
 	else if ((pid = fork()) < 0) {
 		warn(_("fork failed"));
-		free(inst);
+		free_instance(inst);
 		return errno;
 	} else if (pid == 0) {
 		if (!interactive)
@@ -705,7 +713,7 @@ static struct fsck_instance *wait_one(int flags)
 				warnx(_("wait: no more child process?!?"));
 				return NULL;
 			}
-			warn(_("waidpid failed"));
+			warn(_("waitpid failed"));
 			continue;
 		}
 		for (prev = 0, inst = instance_list;
@@ -1572,8 +1580,8 @@ int main(int argc, char *argv[])
 	}
 	status |= wait_many(FLAG_WAIT_ALL);
 	free(fsck_path);
-	mnt_free_cache(mntcache);
-	mnt_free_table(fstab);
-	mnt_free_table(mtab);
+	mnt_unref_cache(mntcache);
+	mnt_unref_table(fstab);
+	mnt_unref_table(mtab);
 	return status;
 }

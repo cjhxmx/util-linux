@@ -248,7 +248,8 @@ new_probe(const char *devname, int mode)
 	blkid_probe_enable_superblocks(pr, 1);
 	blkid_probe_set_superblocks_flags(pr, BLKID_SUBLKS_MAGIC |
 			BLKID_SUBLKS_TYPE | BLKID_SUBLKS_USAGE |
-			BLKID_SUBLKS_LABEL | BLKID_SUBLKS_UUID);
+			BLKID_SUBLKS_LABEL | BLKID_SUBLKS_UUID |
+			BLKID_SUBLKS_BADCSUM);
 
 	blkid_probe_enable_partitions(pr, 1);
 	blkid_probe_set_partitions_flags(pr, BLKID_PARTS_MAGIC);
@@ -307,8 +308,10 @@ static void do_wipe_real(blkid_probe pr, const char *devname,
 	if (flags & WP_FL_QUIET)
 		return;
 
-	printf(_("%s: %zd bytes were erased at offset 0x%08jx (%s): "),
-		devname, w->len, w->offset, w->type);
+	printf(P_("%s: %zd byte was erased at offset 0x%08jx (%s): ",
+		  "%s: %zd bytes were erased at offset 0x%08jx (%s): ",
+		  w->len),
+	       devname, w->len, w->offset, w->type);
 
 	for (i = 0; i < w->len; i++) {
 		printf("%02x", w->magic[i]);

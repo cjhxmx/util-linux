@@ -102,7 +102,6 @@
 #include "rpmatch.h"
 #include "blkdev.h"
 #include "strutils.h"
-#include "common.h"
 #include "mbsalign.h"
 #include "widechar.h"
 
@@ -112,7 +111,7 @@ struct systypes {
 };
 
 static struct systypes i386_sys_types[] = {
-	#include "dos_part_types.h"
+	#include "pt-mbr-partnames.h"
 };
 
 #ifdef __GNU__
@@ -325,7 +324,11 @@ int num_parts = 0;
 int logical = 0;
 long long logical_sectors[MAXIMUM_PARTS];
 
-__sighandler_t old_SIGINT, old_SIGTERM;
+#ifdef HAVE_SIGHANDLER_T
+sighandler_t old_SIGINT, old_SIGTERM;
+#else
+void (* old_SIGINT)(int), (* old_SIGTERM)(int);
+#endif
 
 int arrow_cursor = FALSE;
 int display_units = MEGABYTES;
@@ -2757,7 +2760,7 @@ copyright(void) {
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
     fputs(USAGE_HEADER, out);
-    fprintf(out, _(" %s [options] device\n"), program_invocation_short_name);
+    fprintf(out, _(" %s [options] <device>\n"), program_invocation_short_name);
     fputs(USAGE_OPTIONS, out);
     fputs(_(" -c, --cylinders <number>  set the number of cylinders to use\n"), out);
     fputs(_(" -h, --heads <number>      set the number of heads to use\n"), out);

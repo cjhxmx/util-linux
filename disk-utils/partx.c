@@ -86,7 +86,7 @@ struct colinfo infos[] = {
 	[COL_UUID]     = { "UUID",    36, 0, N_("partition UUID")},
 	[COL_SCHEME]   = { "SCHEME",  0.1, TT_FL_TRUNC, N_("partition table type (dos, gpt, ...)")},
 	[COL_FLAGS]    = { "FLAGS",   0.1, TT_FL_TRUNC, N_("partition flags")},
-	[COL_TYPE]     = { "TYPE",    1, TT_FL_RIGHT, N_("partition type hex or uuid")},
+	[COL_TYPE]     = { "TYPE",    1, TT_FL_RIGHT, N_("partition type (a string, a UUID, or hex)")},
 };
 
 #define NCOLS ARRAY_SIZE(infos)
@@ -121,7 +121,7 @@ static void assoc_loopdev(const char *fname)
 	rc = loopcxt_setup_device(&lc);
 
 	if (rc == -EBUSY)
-		err(EXIT_FAILURE, _("%s: failed to setup loop device"), fname);
+		err(EXIT_FAILURE, _("%s: failed to set up loop device"), fname);
 
 	loopdev = 1;
 }
@@ -523,7 +523,9 @@ static int list_parts(blkid_partlist ls, int lower, int upper)
 		start = blkid_partition_get_start(par);
 		size =  blkid_partition_get_size(par);
 
-		printf(_("#%2d: %9ju-%9ju (%9ju sectors, %6ju MB)\n"),
+		printf(P_("#%2d: %9ju-%9ju (%9ju sector, %6ju MB)\n",
+			  "#%2d: %9ju-%9ju (%9ju sectors, %6ju MB)\n",
+			  size),
 		       n, start, start + size -1,
 		       size, (size << 9) / 1000000);
 	}
@@ -571,19 +573,14 @@ static void add_tt_line(struct tt *tt, blkid_partition par)
 					blkid_partition_get_size(par) << 9);
 			break;
 		case COL_NAME:
-			str = (char *) blkid_partition_get_name(par);
-			if (str)
-				str = xstrdup(str);
+			str = xstrdup(blkid_partition_get_name(par));
 			break;
 		case COL_UUID:
-			str = (char *) blkid_partition_get_uuid(par);
-			if (str)
-				str = xstrdup(str);
+			str = xstrdup(blkid_partition_get_uuid(par));
 			break;
 		case COL_TYPE:
-			str = (char *) blkid_partition_get_type_string(par);
-			if (str)
-				str = xstrdup(str);
+			if (blkid_partition_get_type_string(par))
+				str = xstrdup(blkid_partition_get_type_string(par));
 			else
 				xasprintf(&str, "0x%x",
 					blkid_partition_get_type(par));
@@ -594,11 +591,8 @@ static void add_tt_line(struct tt *tt, blkid_partition par)
 		case COL_SCHEME:
 		{
 			blkid_parttable tab = blkid_partition_get_table(par);
-			if (tab) {
-				str = (char *) blkid_parttable_get_type(tab);
-				if (str)
-					str = xstrdup(str);
-			}
+			if (tab)
+				str = xstrdup(blkid_parttable_get_type(tab));
 			break;
 		}
 		default:
@@ -622,7 +616,7 @@ static int show_parts(blkid_partlist ls, int tt_flags, int lower, int upper)
 	if (!nparts)
 		return 0;
 
-	tt = tt_new_table(tt_flags);
+	tt = tt_new_table(tt_flags | TT_FL_FREEDATA);
 	if (!tt) {
 		warn(_("failed to initialize output table"));
 		return -1;
@@ -706,12 +700,12 @@ static void __attribute__((__noreturn__)) usage(FILE *out)
 	fputs(USAGE_OPTIONS, out);
 	fputs(_(" -a, --add            add specified partitions or all of them\n"), out);
 	fputs(_(" -d, --delete         delete specified partitions or all of them\n"), out);
-	fputs(_(" -s, --show           list partitions\n\n"), out);
 	fputs(_(" -u, --update         update specified partitions or all of them\n"), out);
+	fputs(_(" -s, --show           list partitions\n\n"), out);
 	fputs(_(" -b, --bytes          print SIZE in bytes rather than in human readable format\n"), out);
 	fputs(_(" -g, --noheadings     don't print headings for --show\n"), out);
 	fputs(_(" -n, --nr <n:m>       specify the range of partitions (e.g. --nr 2:4)\n"), out);
-	fputs(_(" -o, --output <type>  define which output columns to use\n"), out);
+	fputs(_(" -o, --output <list>  define which output columns to use\n"), out);
 	fputs(_(" -P, --pairs          use key=\"value\" output format\n"), out);
 	fputs(_(" -r, --raw            use raw output format\n"), out);
 	fputs(_(" -t, --type <type>    specify the partition type (dos, bsd, solaris, etc.)\n"), out);

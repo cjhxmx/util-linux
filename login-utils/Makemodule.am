@@ -4,10 +4,11 @@ usrbin_exec_PROGRAMS += last
 dist_man_MANS += \
 	login-utils/last.1 \
 	login-utils/lastb.1
-last_SOURCES = login-utils/last.c
+last_SOURCES = login-utils/last.c lib/strutils.c
+last_LDADD = $(LDADD) libcommon.la
 
 install-exec-hook-last:
-	cd $(DESTDIR)$(usrsbin_execdir) && ln -sf last lastb
+	cd $(DESTDIR)$(usrbin_execdir) && ln -sf last lastb
 
 INSTALL_EXEC_HOOKS += install-exec-hook-last
 endif
@@ -57,6 +58,13 @@ if HAVE_SELINUX
 login_LDADD += -lselinux
 endif
 endif # BUILD_LOGIN
+
+
+if BUILD_NOLOGIN
+sbin_PROGRAMS += nologin
+dist_man_MANS += login-utils/nologin.8
+nologin_SOURCES = login-utils/nologin.c
+endif
 
 
 if BUILD_UTMPDUMP

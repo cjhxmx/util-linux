@@ -49,6 +49,19 @@ int fdisk_ask_set_type(struct fdisk_ask *ask, int type)
 	return 0;
 }
 
+unsigned int fdisk_ask_get_flags(struct fdisk_ask *ask)
+{
+	assert(ask);
+	return ask->flags;
+}
+
+int fdisk_ask_set_flags(struct fdisk_ask *ask, unsigned int flags)
+{
+	assert(ask);
+	ask->flags = flags;
+	return 0;
+}
+
 int fdisk_do_ask(struct fdisk_context *cxt, struct fdisk_ask *ask)
 {
 	int rc;
@@ -56,7 +69,12 @@ int fdisk_do_ask(struct fdisk_context *cxt, struct fdisk_ask *ask)
 	assert(ask);
 	assert(cxt);
 
-	DBG(ASK, dbgprint("asking for '%s'", ask->query));
+	DBG(ASK, dbgprint("do_ask for '%s'",
+				ask->query ? ask->query :
+				ask->type == FDISK_ASKTYPE_INFO  ? "info" :
+				ask->type == FDISK_ASKTYPE_WARNX ? "warnx" :
+				ask->type == FDISK_ASKTYPE_WARN  ? "warn" :
+				"?nothing?"));
 
 	if (!cxt->ask_cb) {
 		DBG(ASK, dbgprint("no ask callback specified!"));
@@ -185,11 +203,19 @@ int fdisk_ask_number_set_relative(struct fdisk_ask *ask, int relative)
 	return 0;
 }
 
+int fdisk_ask_number_inchars(struct fdisk_ask *ask)
+{
+	assert(ask);
+	assert(is_number_ask(ask));
+	return ask->data.num.inchars;
+}
+
 /*
  * Generates string with list ranges (e.g. 1,2,5-8) for the 'cur'
  */
+#define tochar(num)	((int) ('a' + num - 1))
 static char *mk_string_list(char *ptr, size_t *len, size_t *begin,
-			    size_t *run, ssize_t cur)
+			    size_t *run, ssize_t cur, int inchar)
 {
 	int rlen;
 
@@ -210,11 +236,16 @@ static char *mk_string_list(char *ptr, size_t *len, size_t *begin,
 
 					/* add to the list */
 	if (!*run)
-		rlen = snprintf(ptr, *len, "%zd,", *begin);
+		rlen = inchar ? snprintf(ptr, *len, "%c,", tochar(*begin)) :
+				snprintf(ptr, *len, "%zu,", *begin);
 	else if (*run == 1)
-		rlen = snprintf(ptr, *len, "%zd,%zd,", *begin, *begin + 1);
+		rlen = inchar ?
+			snprintf(ptr, *len, "%c,%c,", tochar(*begin), tochar(*begin + 1)) :
+			snprintf(ptr, *len, "%zu,%zu,", *begin, *begin + 1);
 	else
-		rlen = snprintf(ptr, *len, "%zd-%zd,", *begin, *begin + *run);
+		rlen = inchar ?
+			snprintf(ptr, *len, "%c-%c,", tochar(*begin), tochar(*begin + *run)) :
+			snprintf(ptr, *len, "%zu-%zu,", *begin, *begin + *run);
 
 	if (rlen < 0 || (size_t) rlen + 1 > *len)
 		return NULL;
@@ -241,7 +272,7 @@ static char *mk_string_list(char *ptr, size_t *len, size_t *begin,
 /* returns: 1=0 on success, < 0 on error, 1 if no free/used partition */
 int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew)
 {
-	int rc = 0;
+	int rc = 0, inchar = 0;
 	char range[BUFSIZ], *ptr = range;
 	size_t i, len = sizeof(range), begin = 0, run = 0;
 	struct fdisk_ask *ask = NULL;
@@ -251,9 +282,15 @@ int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew)
 	assert(cxt->label);
 	assert(partnum);
 
-	DBG(ASK, dbgprint("%s: asking for %s partition number (max: %zd)",
-				cxt->label->name, wantnew ? "new" : "used",
-				cxt->label->nparts_max));
+	if (cxt->label && cxt->label->flags & FDISK_LABEL_FL_INCHARS_PARTNO)
+		inchar = 1;
+
+	DBG(ASK, dbgprint("%s: asking for %s partition number "
+			  "(max: %zu, inchar: %s)",
+			cxt->label->name,
+			wantnew ? "new" : "used",
+			cxt->label->nparts_max,
+			inchar ? "yes" : "not"));
 
 	ask = fdisk_new_ask();
 	if (!ask)
@@ -262,6 +299,8 @@ int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew)
 	fdisk_ask_set_type(ask, FDISK_ASKTYPE_NUMBER);
 	num = &ask->data.num;
 
+	ask->data.num.inchars = inchar ? 1 : 0;
+
 	for (i = 0; i < cxt->label->nparts_max; i++) {
 		int status = 0;
 
@@ -269,7 +308,7 @@ int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew)
 		if (rc)
 			break;
 		if (wantnew && !(status & FDISK_PARTSTAT_USED)) {
-			ptr = mk_string_list(ptr, &len, &begin, &run, i);
+			ptr = mk_string_list(ptr, &len, &begin, &run, i, inchar);
 			if (!ptr) {
 				rc = -EINVAL;
 				break;
@@ -278,24 +317,24 @@ int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew)
 				num->dfl = num->low = i + 1;
 			num->hig = i + 1;
 		} else if (!wantnew && (status & FDISK_PARTSTAT_USED)) {
-			ptr = mk_string_list(ptr, &len, &begin, &run, i);
+			ptr = mk_string_list(ptr, &len, &begin, &run, i, inchar);
 			if (!num->low)
 				num->low = i + 1;
 			num->dfl = num->hig = i + 1;
 		}
 	}
 
-	DBG(ASK, dbgprint("ask limits: low: %zd, high: %zd, default: %zd",
+	DBG(ASK, dbgprint("ask limits: low: %ju, high: %ju, default: %ju",
 				num->low, num->hig, num->dfl));
 
 	if (!rc && !wantnew && num->low == num->hig) {
 		if (num->low > 0) {
 			/* only one existing partiton, don't ask, return the number */
 			fdisk_ask_number_set_result(ask, num->low);
-			fdisk_info(cxt, _("Selected partition %d"), num->low);
+			fdisk_info(cxt, _("Selected partition %ju"), num->low);
 
 		} else if (num->low == 0) {
-			fdisk_info(cxt, _("No partition is defined yet!"));
+			fdisk_warnx(cxt, _("No partition is defined yet!"));
 			rc = 1;
 		}
 		goto dont_ask;
@@ -304,16 +343,16 @@ int fdisk_ask_partnum(struct fdisk_context *cxt, size_t *partnum, int wantnew)
 		if (num->low > 0) {
 			/* only one free partition, don't ask, return the number */
 			fdisk_ask_number_set_result(ask, num->low);
-			fdisk_info(cxt, _("Selected partition %d"), num->low);
+			fdisk_info(cxt, _("Selected partition %ju"), num->low);
 		}
 		if (num->low == 0) {
-			fdisk_info(cxt, _("No free partition available!"));
+			fdisk_warnx(cxt, _("No free partition available!"));
 			rc = 1;
 		}
 		goto dont_ask;
 	}
 	if (!rc) {
-		mk_string_list(ptr, &len, &begin, &run, -1);	/* terminate the list */
+		mk_string_list(ptr, &len, &begin, &run, -1, inchar);	/* terminate the list */
 		rc = fdisk_ask_number_set_range(ask, range);
 	}
 	if (!rc)
@@ -327,7 +366,7 @@ dont_ask:
 		if (*partnum)
 			*partnum -= 1;
 	}
-	DBG(ASK, dbgprint("result: %zd [rc=%d]\n", fdisk_ask_number_get_result(ask), rc));
+	DBG(ASK, dbgprint("result: %ju [rc=%d]\n", fdisk_ask_number_get_result(ask), rc));
 	fdisk_free_ask(ask);
 	return rc;
 }
@@ -364,7 +403,53 @@ int fdisk_ask_number(struct fdisk_context *cxt,
 		*result = fdisk_ask_number_get_result(ask);
 
 	fdisk_free_ask(ask);
-	DBG(ASK, dbgprint("result: %zd [rc=%d]\n", *result, rc));
+	DBG(ASK, dbgprint("result: %ju [rc=%d]\n", *result, rc));
+	return rc;
+}
+
+char *fdisk_ask_string_get_result(struct fdisk_ask *ask)
+{
+	assert(ask);
+	assert(fdisk_is_ask(ask, STRING));
+	return ask->data.str.result;
+}
+
+/*
+ * The @result has to be poiter to the allocated buffer.
+ */
+int fdisk_ask_string_set_result(struct fdisk_ask *ask, char *result)
+{
+	assert(ask);
+	ask->data.str.result = result;
+	return 0;
+}
+
+/*
+ * Don't forget to deallocate @result.
+ */
+int fdisk_ask_string(struct fdisk_context *cxt,
+		     const char *query,
+		     char **result)
+{
+	struct fdisk_ask *ask;
+	int rc;
+
+	assert(cxt);
+
+	ask = fdisk_new_ask();
+	if (!ask)
+		return -ENOMEM;
+
+	rc = fdisk_ask_set_type(ask, FDISK_ASKTYPE_STRING);
+	if (!rc)
+		fdisk_ask_set_query(ask, query);
+	if (!rc)
+		rc = fdisk_do_ask(cxt, ask);
+	if (!rc)
+		*result = fdisk_ask_string_get_result(ask);
+
+	fdisk_free_ask(ask);
+	DBG(ASK, dbgprint("result: %s [rc=%d]\n", *result, rc));
 	return rc;
 }
 
@@ -408,6 +493,33 @@ int fdisk_ask_yesno_set_result(struct fdisk_ask *ask, uint64_t result)
 	return 0;
 }
 
+struct tt *fdisk_ask_get_table(struct fdisk_ask *ask)
+{
+	assert(ask);
+	assert(fdisk_is_ask(ask, TABLE));
+	return ask->data.table;
+}
+
+int fdisk_print_table(struct fdisk_context *cxt, struct tt *tb)
+{
+	struct fdisk_ask *ask;
+	int rc;
+
+	assert(cxt);
+	assert(tb);
+
+	ask = fdisk_new_ask();
+	if (!ask)
+		return -ENOMEM;
+
+	fdisk_ask_set_type(ask, FDISK_ASKTYPE_TABLE);
+	ask->data.table = tb;
+
+	rc = fdisk_do_ask(cxt, ask);
+
+	fdisk_free_ask(ask);
+	return rc;
+}
 
 #define is_print_ask(a) (fdisk_is_ask(a, WARN) || fdisk_is_ask(a, WARNX) || fdisk_is_ask(a, INFO))
 
@@ -441,7 +553,7 @@ int fdisk_ask_print_set_mesg(struct fdisk_ask *ask, const char *mesg)
 }
 
 static int do_vprint(struct fdisk_context *cxt, int errnum, int type,
-		 const char *fmt, va_list va)
+		 unsigned int flags, const char *fmt, va_list va)
 {
 	struct fdisk_ask *ask;
 	int rc;
@@ -459,6 +571,7 @@ static int do_vprint(struct fdisk_context *cxt, int errnum, int type,
 	}
 
 	fdisk_ask_set_type(ask, type);
+	fdisk_ask_set_flags(ask, flags);
 	fdisk_ask_print_set_mesg(ask, mesg);
 	if (errnum >= 0)
 		fdisk_ask_print_set_errno(ask, errnum);
@@ -476,9 +589,37 @@ int fdisk_info(struct fdisk_context *cxt, const char *fmt, ...)
 
 	assert(cxt);
 	va_start(ap, fmt);
-	rc = do_vprint(cxt, -1, FDISK_ASKTYPE_INFO, fmt, ap);
+	rc = do_vprint(cxt, -1, FDISK_ASKTYPE_INFO, 0, fmt, ap);
 	va_end(ap);
 	return rc;
+}
+
+/* "smart" version, allows to set flags for the message */
+int fdisk_sinfo(struct fdisk_context *cxt,
+		unsigned int flags, const char *fmt, ...)
+{
+	int rc;
+	va_list ap;
+
+	assert(cxt);
+	va_start(ap, fmt);
+	rc = do_vprint(cxt, -1, FDISK_ASKTYPE_INFO, flags, fmt, ap);
+	va_end(ap);
+	return rc;
+
+}
+
+int fdisk_colon(struct fdisk_context *cxt, const char *fmt, ...)
+{
+	int rc;
+	va_list ap;
+
+	assert(cxt);
+	va_start(ap, fmt);
+	rc = do_vprint(cxt, -1, FDISK_ASKTYPE_INFO, FDISK_INFO_COLON, fmt, ap);
+	va_end(ap);
+	return rc;
+
 }
 
 int fdisk_warn(struct fdisk_context *cxt, const char *fmt, ...)
@@ -488,7 +629,7 @@ int fdisk_warn(struct fdisk_context *cxt, const char *fmt, ...)
 
 	assert(cxt);
 	va_start(ap, fmt);
-	rc = do_vprint(cxt, errno, FDISK_ASKTYPE_WARN, fmt, ap);
+	rc = do_vprint(cxt, errno, FDISK_ASKTYPE_WARN, 0, fmt, ap);
 	va_end(ap);
 	return rc;
 }
@@ -500,18 +641,28 @@ int fdisk_warnx(struct fdisk_context *cxt, const char *fmt, ...)
 
 	assert(cxt);
 	va_start(ap, fmt);
-	rc = do_vprint(cxt, -1, FDISK_ASKTYPE_WARNX, fmt, ap);
+	rc = do_vprint(cxt, -1, FDISK_ASKTYPE_WARNX, 0, fmt, ap);
 	va_end(ap);
 	return rc;
 }
 
-#ifdef TEST_PROGRAM
-struct fdisk_label *fdisk_new_dos_label(struct fdisk_context *cxt) { return NULL; }
-struct fdisk_label *fdisk_new_bsd_label(struct fdisk_context *cxt) { return NULL; }
-struct fdisk_label *fdisk_new_mac_label(struct fdisk_context *cxt) { return NULL; }
-struct fdisk_label *fdisk_new_sgi_label(struct fdisk_context *cxt) { return NULL; }
-struct fdisk_label *fdisk_new_sun_label(struct fdisk_context *cxt) { return NULL; }
+int fdisk_info_new_partition(
+			struct fdisk_context *cxt,
+			int num, sector_t start, sector_t stop,
+			struct fdisk_parttype *t)
+{
+	int rc;
+	char *str = size_to_human_string(SIZE_SUFFIX_3LETTER | SIZE_SUFFIX_SPACE,
+				     (uint64_t)(stop - start + 1) * cxt->sector_size);
 
+	rc = fdisk_sinfo(cxt, FDISK_INFO_SUCCESS,
+			_("Created a new partition %d of type '%s' and of size %s."),
+			num, t ? t->name : _("Unknown"), str);
+	free(str);
+	return rc;
+}
+
+#ifdef TEST_PROGRAM
 int test_ranges(struct fdisk_test *ts, int argc, char *argv[])
 {
 	/*                1  -  3,       6,    8, 9,   11    13 */
@@ -523,9 +674,9 @@ int test_ranges(struct fdisk_test *ts, int argc, char *argv[])
 	for (i = 0; i < ARRAY_SIZE(nums); i++) {
 		if (!nums[i])
 			continue;
-		ptr = mk_string_list(ptr, &len, &begin, &run, i);
+		ptr = mk_string_list(ptr, &len, &begin, &run, i, 0);
 	}
-	mk_string_list(ptr, &len, &begin, &run, -1);
+	mk_string_list(ptr, &len, &begin, &run, -1, 0);
 	printf("list: '%s'\n", range);
 
 	ptr = range;
@@ -533,9 +684,9 @@ int test_ranges(struct fdisk_test *ts, int argc, char *argv[])
 	for (i = 0; i < ARRAY_SIZE(numx); i++) {
 		if (!numx[i])
 			continue;
-		ptr = mk_string_list(ptr, &len, &begin, &run, i);
+		ptr = mk_string_list(ptr, &len, &begin, &run, i, 0);
 	}
-	mk_string_list(ptr, &len, &begin, &run, -1);
+	mk_string_list(ptr, &len, &begin, &run, -1, 0);
 	printf("empty list: '%s'\n", range);
 
 	return 0;

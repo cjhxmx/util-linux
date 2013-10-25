@@ -111,6 +111,9 @@ static int same_session = 0;
 /* SU_MODE_{RUNUSER,SU} */
 static int su_mode;
 
+/* Don't print PAM info messages (Last login, etc.). */
+static int suppress_pam_info;
+
 static bool _pam_session_opened;
 static bool _pam_cred_established;
 static sig_atomic_t volatile caught_signal = false;
@@ -158,7 +161,7 @@ log_syslog(struct passwd const *pw, bool successful)
       old_user = pwd ? pwd->pw_name : "";
     }
 
-  if (get_terminal_name(STDERR_FILENO, NULL, &tty, NULL) == 0 && tty)
+  if (get_terminal_name(STDERR_FILENO, NULL, &tty, NULL) != 0 || !tty)
     tty = "none";
 
   openlog (program_invocation_short_name, 0 , LOG_AUTH);
@@ -208,10 +211,23 @@ static void log_btmp(struct passwd const *pw)
 	updwtmp(_PATH_BTMP, &ut);
 }
 
+
+static int su_pam_conv(int num_msg, const struct pam_message **msg,
+                       struct pam_response **resp, void *appdata_ptr)
+{
+	if (suppress_pam_info
+	    && num_msg == 1
+	    && msg
+	    && msg[0]->msg_style == PAM_TEXT_INFO)
+		return PAM_SUCCESS;
+
+	return misc_conv(num_msg, msg, resp, appdata_ptr);
+}
+
 static struct pam_conv conv =
 {
-  misc_conv,
-  NULL
+	su_pam_conv,
+	NULL
 };
 
 static void
@@ -271,6 +287,8 @@ create_watching_parent (void)
     }
   else
     _pam_session_opened = 1;
+
+  memset(oldact, 0, sizeof(oldact));
 
   child = fork ();
   if (child == (pid_t) -1)
@@ -392,6 +410,9 @@ create_watching_parent (void)
           sigaction(SIGQUIT, &oldact[2], NULL);
           break;
         default:
+	  /* just in case that signal stuff initialization failed and
+	   * caught_signal = true */
+          caught_signal = SIGKILL;
           break;
       }
       kill(0, caught_signal);
@@ -466,9 +487,6 @@ authenticate (const struct passwd *pw)
     }
 
 done:
-
-  if (lpw && lpw->pw_name)
-     pw = lpw;
 
   log_syslog(pw, !is_pam_failure(retval));
 
@@ -789,7 +807,9 @@ su_main (int argc, char **argv, int mode)
 	  num_supp_groups++;
 	  if (num_supp_groups >= NGROUPS_MAX)
 	     errx(EXIT_FAILURE,
-		  _("can't specify more than %d supplemental groups"),
+		  P_("specifying more than %d supplemental group is not possible",
+		     "specifying more than %d supplemental groups is not possible",
+		     NGROUPS_MAX - 1),
 		  NGROUPS_MAX - 1);
 	  gr = getgrnam(optarg);
 	  if (!gr)
@@ -926,6 +946,9 @@ su_main (int argc, char **argv, int mode)
   }
 
   init_groups (pw, groups, num_supp_groups);
+
+  if (!simulate_login || command)
+    suppress_pam_info = 1;		/* don't print PAM info messages */
 
   create_watching_parent ();
   /* Now we're in the child.  */

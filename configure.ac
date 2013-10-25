@@ -26,7 +26,7 @@ PACKAGE_VERSION_RELEASE=0
 
 dnl libblkid version
 LIBBLKID_VERSION="$PACKAGE_VERSION_MAJOR.$PACKAGE_VERSION_MINOR.$PACKAGE_VERSION_RELEASE"
-LIBBLKID_DATE="25-Apr-2013"
+LIBBLKID_DATE="21-Oct-2013"
 LIBBLKID_LT_MAJOR=1
 LIBBLKID_LT_MINOR=1
 LIBBLKID_LT_MICRO=0
@@ -50,14 +50,14 @@ LIBMOUNT_VERSION_INFO=`expr $LIBMOUNT_LT_MAJOR + $LIBMOUNT_LT_MINOR`:$LIBMOUNT_L
 AS_CASE([$exec_prefix:$prefix],
 [NONE:NONE | NONE:/usr | /usr:*],
   [AC_MSG_NOTICE([Default --exec-prefix detected.])
-   AS_CASE([$bindir],  [${exec_prefix}/bin],  [bindir=/bin;  AC_MSG_NOTICE([  --bindir defaults to /bin])  ])
-   AS_CASE([$sbindir], [${exec_prefix}/sbin], [bindir=/sbin; AC_MSG_NOTICE([  --sbindir defaults to /sbin])])
-   AS_CASE([$libdir],  [${exec_prefix}/lib],  [bindir=/lib;  AC_MSG_NOTICE([  --libdir defaults to /lib])  ])
+   AS_CASE([$bindir],  ['${exec_prefix}/bin'],  [bindir=/bin;   AC_MSG_NOTICE([  --bindir defaults to /bin])  ])
+   AS_CASE([$sbindir], ['${exec_prefix}/sbin'], [sbindir=/sbin; AC_MSG_NOTICE([  --sbindir defaults to /sbin])])
+   AS_CASE([$libdir],  ['${exec_prefix}/lib'],  [libdir=/lib;   AC_MSG_NOTICE([  --libdir defaults to /lib])  ])
   ]
 )
 
 AS_CASE([$prefix:$localstatedir],
-  [NONE:${prefix}/var | /usr:${prefix}/var],
+  [NONE:'${prefix}/var' | /usr:'${prefix}/var'],
     [localstatedir=/run
      AC_MSG_NOTICE([  --localstatedir defaults to /run])
     ]
@@ -73,7 +73,7 @@ usrsbin_execdir='${exec_prefix}/sbin'
 AC_SUBST([usrsbin_execdir])
 
 AS_CASE([$libdir],
- [${exec_prefix}/* | ${prefix}/* | /usr/*],
+ ['${exec_prefix}/'* | '${prefix}/'* | /usr/*],
    [usrlib_execdir=$libdir],
  [usrlib_execdir='${exec_prefix}'$libdir]
 )
@@ -204,6 +204,7 @@ AC_CHECK_HEADERS([ \
 	sys/swap.h \
 	sys/syscall.h \
 	sys/time.h \
+	sys/ttydefaults.h \
 	sys/types.h \
 	sys/un.h \
 	unistd.h \
@@ -390,7 +391,7 @@ AC_ARG_ENABLE([static-programs],
 
 AS_CASE([$enable_static_programs],
   [yes],
-    [enable_static_programs=m4_quote([UL_STATIC_PROGRAMS])],
+    [enable_static_programs=m4_quote(UL_STATIC_PROGRAMS)],
   [no],
     [enable_static_programs=]
 )
@@ -400,6 +401,7 @@ m4_foreach([UL_PRG], m4_defn([UL_STATIC_PROGRAMS]), [
   AS_CASE([,$enable_static_programs,],
    [*,UL_PRG,*], [static_[]UL_PRG=yes]
   )
+  AS_IF([test "x$static_[]UL_PRG" = xyes], [AC_MSG_NOTICE([enable static build: UL_PRG.])])
   AM_CONDITIONAL([HAVE_STATIC_]m4_toupper(UL_PRG),
     [test "x$static_[]UL_PRG" = xyes])
 ])
@@ -429,6 +431,7 @@ AC_CACHE_VAL([scanf_cv_alloc_modifier],
 
     [AC_COMPILE_IFELSE([AC_LANG_SOURCE([
      #include <stdio.h>
+     #include <unistd.h>
 
      #ifdef __GLIBC__
 
@@ -436,8 +439,13 @@ AC_CACHE_VAL([scanf_cv_alloc_modifier],
      #error %m is not available
      #endif
 
-     #else
+     #elif defined(_POSIX_VERSION)
 
+     #if _POSIX_VERSION < 200809L
+     #error %m is not available
+     #endif
+
+     #else
      #error Your C-library is not supported.
      #endif
      ])],
@@ -488,6 +496,10 @@ AC_CHECK_TYPES([cpu_set_t], [have_cpu_set_t=yes], [], [[
 ]])
 
 AM_CONDITIONAL([HAVE_CPU_SET_T], [test "x$have_cpu_set_t" = xyes])
+
+AC_CHECK_TYPES([sighandler_t], [], [], [[
+#include <signal.h>
+]])
 
 AC_CHECK_DECLS([CPU_ALLOC], [], [], [[
 #include <sched.h>
@@ -594,25 +606,50 @@ AM_CONDITIONAL([HAVE_NCURSES], [false])
 
 AS_IF([test "x$with_ncurses" != xno], [
   have_ncurses=no
-  AC_CHECK_HEADERS([ncurses.h ncurses/ncurses.h], [
-    AS_IF([test "x$with_ncurses" = xauto], [
-      UL_CHECK_LIB([ncursesw], [initscr], [ncurses])
-      AS_IF([test "x$have_ncurses" = xyes], [
-	AC_CHECK_HEADERS([ncursesw/ncurses.h])
-	NCURSES_LIBS="-lncursesw"
+
+  dnl First try to find the pkg-config module.
+  PKG_CHECK_MODULES(NCURSESW, [ncursesw], [
+    have_ncurses=yes
+    NCURSES_LIBS=${NCURSESW_LIBS}
+    NCURSES_CFLAGS=${NCURSESW_CFLAGS}
+    AC_DEFINE([HAVE_LIBNCURSESW])
+  ], [
+    PKG_CHECK_MODULES(NCURSES, [ncurses], [
+      have_ncurses=yes
+      AC_DEFINE([HAVE_LIBNCURSES])
+    ], [:])
+  ])
+
+  AS_IF([test "x$have_ncurses" = xyes], [
+    dnl If that worked, setup the defines that the code expects.
+    save_CPPFLAGS="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $NCURSES_CFLAGS"
+    AC_CHECK_HEADERS([ncurses.h])
+    CPPFLAGS="$save_CPPFLAGS"
+  ], [
+    dnl If that failed, fall back to classic searching.
+    AC_CHECK_HEADERS([ncurses.h ncurses/ncurses.h], [
+      AS_IF([test "x$with_ncurses" = xauto], [
+	UL_CHECK_LIB([ncursesw], [initscr], [ncurses])
+	AS_IF([test "x$have_ncurses" = xyes], [
+	  AC_CHECK_HEADERS([ncursesw/ncurses.h])
+	  NCURSES_LIBS="-lncursesw"
+	])
       ])
-    ])
-    AS_IF([test "x$have_ncurses" = xno], [
-      UL_CHECK_LIB(ncurses, initscr)
-      AS_IF([test "x$have_ncurses" = xyes], [
-	NCURSES_LIBS="-lncurses"
+      AS_IF([test "x$have_ncurses" = xno], [
+	UL_CHECK_LIB(ncurses, initscr)
+	AS_IF([test "x$have_ncurses" = xyes], [
+	  NCURSES_LIBS="-lncurses"
+	])
       ])
     ])
   ])
+
   AS_IF([test "x$have_ncurses" = xno], [
     AC_MSG_ERROR([ncurses or ncursesw selected, but library not found (--without-ncurses to disable)])
   ])
 ])
+AC_SUBST([NCURSES_CFLAGS])
 AC_SUBST([NCURSES_LIBS])
 
 
@@ -637,12 +674,19 @@ AS_IF([test "x$with_slang" = xyes], [
 ])
 AM_CONDITIONAL([HAVE_SLANG], [test "x$have_slang" = xyes])
 
-
 AM_CONDITIONAL([BUILD_CFDISK], [test "x$have_slang" = xyes -o "x$have_ncurses" = xyes])
 
 
-have_tinfo=no
-AC_CHECK_LIB([tinfo], [tgetent], [have_tinfo=yes])
+dnl Try pkg-config for libtinfo
+PKG_CHECK_MODULES(TINFO, [tinfo], [have_tinfo=yes], [
+    dnl If that failed, fall back to classic searching.
+    AC_CHECK_LIB([tinfo], [tgetent], [
+       have_tinfo=yes
+       TINFO_LIBS="-ltinfo"
+       TINFO_CFLAGS=""])
+])
+AC_SUBST([TINFO_LIBS])
+AC_SUBST([TINFO_CFLAGS])
 AM_CONDITIONAL([HAVE_TINFO], [test "x$have_tinfo" = xyes])
 
 
@@ -667,7 +711,6 @@ AC_ARG_ENABLE([most-builds],
 )
 AS_IF([test "x$enable_most_builds" = xyes], [
   enable_chfn_chsh=yes
-  enable_elvtune=check
   enable_line=yes
   enable_mesg=yes
   enable_newgrp=yes
@@ -676,6 +719,7 @@ AS_IF([test "x$enable_most_builds" = xyes], [
   enable_tunelp=yes
   enable_vipw=yes
   enable_write=yes
+  with_python=yes
 ])
 
 dnl
@@ -1034,15 +1078,6 @@ UL_REQUIRES_SYSCALL_CHECK([pivot_root], [UL_CHECK_SYSCALL([pivot_root])])
 AM_CONDITIONAL([BUILD_PIVOT_ROOT], [test "x$build_pivot_root" = xyes])
 
 
-AC_ARG_ENABLE([elvtune],
-  AS_HELP_STRING([--enable-elvtune], [build elvtune (only works with 2.2 and 2.4 kernels)]),
-  [], [enable_elvtune=no]
-)
-UL_BUILD_INIT([elvtune])
-UL_REQUIRES_LINUX([elvtune])
-AM_CONDITIONAL([BUILD_ELVTUNE], [test "x$build_elvtune" = xyes])
-
-
 AC_ARG_ENABLE([tunelp],
   AS_HELP_STRING([--enable-tunelp], [build tunelp]),
   [], [enable_tunelp=no]
@@ -1219,6 +1254,14 @@ AS_IF([test "x$enable_login_stat_mail" = xyes], [
 ])
 
 
+AC_ARG_ENABLE([nologin],
+  AS_HELP_STRING([--disable-nologin], [do not build nologin]),
+  [], [enable_nologin=yes]
+)
+UL_BUILD_INIT([nologin])
+AM_CONDITIONAL([BUILD_NOLOGIN], [test "x$build_nologin" = xyes])
+
+
 AC_ARG_ENABLE([sulogin],
   AS_HELP_STRING([--disable-sulogin], [do not build sulogin]),
   [], [enable_sulogin=yes]
@@ -1383,6 +1426,34 @@ AC_ARG_ENABLE([bash-completion],
 AM_CONDITIONAL([BUILD_BASH_COMPLETION], [test "x$enable_bash_completion" = xyes])
 
 
+AC_ARG_WITH([python],
+  AS_HELP_STRING([--with-python], [generate python bindings, use --with-python={2,3} to force version]),
+  [], [with_python=no]
+)
+
+have_python=no
+AS_IF([test "x$with_python" != xno], [
+  # We follow distributions default and look for PKG module name "python"
+  # (minimal version is 2) but if major version is explicitly specified by
+  # --with-python=2 or --with-python=3 then we look for PKG module "python2" or
+  # "python3".
+  AS_IF([test "x$withval" != xno -a "x$withval" != xyes],
+	[pymajor="$withval"; PYTHON=python${pymajor}], [pymajor="2"])
+  AM_PATH_PYTHON([$pymajor], [have_python=yes], [have_python=no])
+  AS_CASE([$with_python:$have_python],
+    [yes:no],
+      [AC_MSG_ERROR([python selected but libpython not found])]
+  )
+  PKG_CHECK_MODULES([PYTHON], [python-$PYTHON_VERSION])
+
+  UL_BUILD_INIT([pylibmount], [check])
+  UL_REQUIRES_HAVE([pylibmount], [python], [libpython])
+  UL_REQUIRES_BUILD([pylibmount], [libmount])
+])
+
+AM_CONDITIONAL([BUILD_PYLIBMOUNT], [test "x$build_pylibmount" = "xyes"])
+
+
 AC_ARG_ENABLE([pg-bell],
   AS_HELP_STRING([--disable-pg-bell], [let pg not ring the bell on invalid keys]),
   [], [enable_pg_bell=yes]
@@ -1462,6 +1533,16 @@ AC_ARG_VAR([SUID_CFLAGS],
 AC_ARG_VAR([SUID_LDFLAGS],
 	   [LDFLAGS used for binaries which are usually with the suid bit])
 
+AC_ARG_VAR([DAEMON_CFLAGS],
+	   [CFLAGS used for binaries which are usually executed as daemons])
+AC_ARG_VAR([DAEMON_LDFLAGS],
+	   [LDFLAGS used for binaries which are usually executed as daemons])
+
+AC_ARG_VAR([SOLIB_CFLAGS],
+	   [CFLAGS used for shared libraries])
+AC_ARG_VAR([SOLIB_LDFLAGS],
+	   [LDFLAGS used for shared libraries])
+
 LIBS=""
 
 
@@ -1504,7 +1585,12 @@ AC_MSG_RESULT([
 	suid cflags:       ${SUID_CFLAGS}
 	ldflags:           ${LDFLAGS}
 	suid ldflags:      ${SUID_LDFLAGS}
-	Bash completions dir: ${with_bashcompletiondir}
+
+	Python:            ${PYTHON}
+	Python version:    ${PYTHON_VERSION}
+	Python libs:       ${pyexecdir}
+
+	Bash completions:  ${with_bashcompletiondir}
 
 	warnings:
 

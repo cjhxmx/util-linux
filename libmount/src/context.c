@@ -89,10 +89,8 @@ void mnt_free_context(struct libmnt_context *cxt)
 	free(cxt->fstype_pattern);
 	free(cxt->optstr_pattern);
 
-	if (!(cxt->flags & MNT_FL_EXTERN_FSTAB))
-		mnt_free_table(cxt->fstab);
-	if (!(cxt->flags & MNT_FL_EXTERN_CACHE))
-		mnt_free_cache(cxt->cache);
+	mnt_unref_table(cxt->fstab);
+	mnt_unref_cache(cxt->cache);
 
 	mnt_context_clear_loopdev(cxt);
 	mnt_free_lock(cxt->lock);
@@ -109,7 +107,7 @@ void mnt_free_context(struct libmnt_context *cxt)
  * @cxt: mount context
  *
  * Resets all information in the context that is directly related to
- * the latest mount (spec, source, target, mount options, ....)
+ * the latest mount (spec, source, target, mount options, ...).
  *
  * The match patterns, cached fstab, cached canonicalized paths and tags and
  * [e]uid are not reset. You have to use
@@ -136,10 +134,8 @@ int mnt_reset_context(struct libmnt_context *cxt)
 
 	fl = cxt->flags;
 
-	if (!(cxt->flags & MNT_FL_EXTERN_FS))
-		mnt_free_fs(cxt->fs);
-
-	mnt_free_table(cxt->mtab);
+	mnt_unref_fs(cxt->fs);
+	mnt_unref_table(cxt->mtab);
 
 	free(cxt->helper);
 	free(cxt->orig_user);
@@ -165,8 +161,6 @@ int mnt_reset_context(struct libmnt_context *cxt)
 	mnt_context_set_tabfilter(cxt, NULL, NULL);
 
 	/* restore non-resettable flags */
-	cxt->flags |= (fl & MNT_FL_EXTERN_FSTAB);
-	cxt->flags |= (fl & MNT_FL_EXTERN_CACHE);
 	cxt->flags |= (fl & MNT_FL_NOMTAB);
 	cxt->flags |= (fl & MNT_FL_FAKE);
 	cxt->flags |= (fl & MNT_FL_SLOPPY);
@@ -235,7 +229,7 @@ int mnt_context_is_restricted(struct libmnt_context *cxt)
 /**
  * mnt_context_set_optsmode
  * @cxt: mount context
- * @mode: MNT_OMASK_* flags
+ * @mode: MNT_OMODE_* flags
  *
  * Controls how to use mount optionssource and target paths from fstab/mtab.
  *
@@ -282,7 +276,7 @@ int mnt_context_set_optsmode(struct libmnt_context *cxt, int mode)
  * mnt_context_get_optsmode
  * @cxt: mount context
  *
- * Returns: MNT_OMASK_* mask or zero.
+ * Returns: MNT_OMODE_* mask or zero.
  */
 
 int mnt_context_get_optsmode(struct libmnt_context *cxt)
@@ -389,10 +383,13 @@ int mnt_context_is_parent(struct libmnt_context *cxt)
  * mnt_context_is_child:
  * @cxt: mount context
  *
- * Return: 1 if mount -F enabled and the current context is child, or 0
+ * Return: 1 f the current context is child, or 0
  */
 int mnt_context_is_child(struct libmnt_context *cxt)
 {
+	/* See mnt_fork_context(), the for fork flag is always disabled
+	 * for children to avoid recursive forking.
+	 */
 	return !mnt_context_is_fork(cxt) && cxt->pid;
 }
 
@@ -633,8 +630,9 @@ int mnt_context_is_loopdel(struct libmnt_context *cxt)
  * @fs: filesystem description
  *
  * The mount context uses private @fs by default. This function allows to
- * overwrite the private @fs with an external instance. Note that the external
- * @fs instance is not deallocated by mnt_free_context() or mnt_reset_context().
+ * overwrite the private @fs with an external instance. This function
+ * increments @fs reference counter (and deincrement reference counter of the
+ * old fs).
  *
  * The @fs will be modified by mnt_context_set_{source,target,options,fstype}
  * functions, If the @fs is NULL, then all current FS specific settings (source,
@@ -646,10 +644,9 @@ int mnt_context_set_fs(struct libmnt_context *cxt, struct libmnt_fs *fs)
 {
 	if (!cxt)
 		return -EINVAL;
-	if (!(cxt->flags & MNT_FL_EXTERN_FS))
-		mnt_free_fs(cxt->fs);
 
-	set_flag(cxt, MNT_FL_EXTERN_FS, fs != NULL);
+	mnt_ref_fs(fs);			/* new */
+	mnt_unref_fs(cxt->fs);		/* old */
 	cxt->fs = fs;
 	return 0;
 }
@@ -669,11 +666,45 @@ struct libmnt_fs *mnt_context_get_fs(struct libmnt_context *cxt)
 	assert(cxt);
 	if (!cxt)
 		return NULL;
-	if (!cxt->fs) {
+	if (!cxt->fs)
 		cxt->fs = mnt_new_fs();
-		cxt->flags &= ~MNT_FL_EXTERN_FS;
-	}
 	return cxt->fs;
+}
+
+/**
+ * mnt_context_get_fs_userdata:
+ * @cxt: mount context
+ *
+ * Returns: pointer to userdata or NULL.
+ */
+void *mnt_context_get_fs_userdata(struct libmnt_context *cxt)
+{
+	assert(cxt);
+	return cxt->fs ? mnt_fs_get_userdata(cxt->fs) : NULL;
+}
+
+/**
+ * mnt_context_get_fstab_userdata:
+ * @cxt: mount context
+ *
+ * Returns: pointer to userdata or NULL.
+ */
+void *mnt_context_get_fstab_userdata(struct libmnt_context *cxt)
+{
+	assert(cxt);
+	return cxt->fstab ? mnt_table_get_userdata(cxt->fstab) : NULL;
+}
+
+/**
+ * mnt_context_get_mtab_userdata:
+ * @cxt: mount context
+ *
+ * Returns: pointer to userdata or NULL.
+ */
+void *mnt_context_get_mtab_userdata(struct libmnt_context *cxt)
+{
+	assert(cxt);
+	return cxt->mtab ? mnt_table_get_userdata(cxt->mtab) : NULL;
 }
 
 /**
@@ -859,7 +890,11 @@ int mnt_context_set_options_pattern(struct libmnt_context *cxt, const char *patt
  *
  * The mount context reads /etc/fstab to the private struct libmnt_table by default.
  * This function allows to overwrite the private fstab with an external
- * instance. Note that the external instance is not deallocated by mnt_free_context().
+ * instance.
+ *
+ * This function modify the @tb reference counter. This function does not set
+ * the cache for the @tb. You have to explicitly call mnt_table_set_cache(tb,
+ * mnt_context_get_cache(cxt));
  *
  * The fstab is used read-only and is not modified, it should be possible to
  * share the fstab between more mount contexts (TODO: test it.)
@@ -874,10 +909,10 @@ int mnt_context_set_fstab(struct libmnt_context *cxt, struct libmnt_table *tb)
 	assert(cxt);
 	if (!cxt)
 		return -EINVAL;
-	if (!(cxt->flags & MNT_FL_EXTERN_FSTAB))
-		mnt_free_table(cxt->fstab);
 
-	set_flag(cxt, MNT_FL_EXTERN_FSTAB, tb != NULL);
+	mnt_ref_table(tb);		/* new */
+	mnt_unref_table(cxt->fstab);	/* old */
+
 	cxt->fstab = tb;
 	return 0;
 }
@@ -893,8 +928,6 @@ int mnt_context_set_fstab(struct libmnt_context *cxt, struct libmnt_table *tb)
  */
 int mnt_context_get_fstab(struct libmnt_context *cxt, struct libmnt_table **tb)
 {
-	struct libmnt_cache *cache;
-
 	assert(cxt);
 	if (!cxt)
 		return -EINVAL;
@@ -906,17 +939,11 @@ int mnt_context_get_fstab(struct libmnt_context *cxt, struct libmnt_table **tb)
 			return -ENOMEM;
 		if (cxt->table_errcb)
 			mnt_table_set_parser_errcb(cxt->fstab, cxt->table_errcb);
-		cxt->flags &= ~MNT_FL_EXTERN_FSTAB;
+		mnt_table_set_cache(cxt->fstab, mnt_context_get_cache(cxt));
 		rc = mnt_table_parse_fstab(cxt->fstab, NULL);
 		if (rc)
 			return rc;
 	}
-
-	cache = mnt_context_get_cache(cxt);
-
-	/*  never touch an external fstab */
-	if (!(cxt->flags & MNT_FL_EXTERN_FSTAB))
-		mnt_table_set_cache(cxt->fstab, cache);
 
 	if (tb)
 		*tb = cxt->fstab;
@@ -935,8 +962,6 @@ int mnt_context_get_fstab(struct libmnt_context *cxt, struct libmnt_table **tb)
  */
 int mnt_context_get_mtab(struct libmnt_context *cxt, struct libmnt_table **tb)
 {
-	struct libmnt_cache *cache;
-
 	assert(cxt);
 	if (!cxt)
 		return -EINVAL;
@@ -954,13 +979,11 @@ int mnt_context_get_mtab(struct libmnt_context *cxt, struct libmnt_table **tb)
 					cxt->table_fltrcb,
 					cxt->table_fltrcb_data);
 
+		mnt_table_set_cache(cxt->mtab, mnt_context_get_cache(cxt));
 		rc = mnt_table_parse_mtab(cxt->mtab, cxt->mtab_path);
 		if (rc)
 			return rc;
 	}
-
-	cache = mnt_context_get_cache(cxt);
-	mnt_table_set_cache(cxt->mtab, cache);
 
 	if (tb)
 		*tb = cxt->mtab;
@@ -1016,7 +1039,6 @@ int mnt_context_set_tabfilter(struct libmnt_context *cxt,
 int mnt_context_get_table(struct libmnt_context *cxt,
 			  const char *filename, struct libmnt_table **tb)
 {
-	struct libmnt_cache *cache;
 	int rc;
 
 	assert(cxt);
@@ -1033,14 +1055,11 @@ int mnt_context_get_table(struct libmnt_context *cxt,
 
 	rc = mnt_table_parse_file(*tb, filename);
 	if (rc) {
-		mnt_free_table(*tb);
+		mnt_unref_table(*tb);
 		return rc;
 	}
 
-	cache = mnt_context_get_cache(cxt);
-	if (cache)
-		mnt_table_set_cache(*tb, cache);
-
+	mnt_table_set_cache(*tb, mnt_context_get_cache(cxt));
 	return 0;
 }
 
@@ -1065,6 +1084,11 @@ int mnt_context_set_tables_errcb(struct libmnt_context *cxt,
 	if (!cxt)
 		return -EINVAL;
 
+	if (cxt->mtab)
+		mnt_table_set_parser_errcb(cxt->mtab, cb);
+	if (cxt->fstab)
+		mnt_table_set_parser_errcb(cxt->fstab, cb);
+
 	cxt->table_errcb = cb;
 	return 0;
 }
@@ -1074,12 +1098,15 @@ int mnt_context_set_tables_errcb(struct libmnt_context *cxt,
  * @cxt: mount context
  * @cache: cache instance or nULL
  *
- * The mount context maintains a private struct libmnt_cache by default.  This function
- * allows to overwrite the private cache with an external instance. Note that
- * the external instance is not deallocated by mnt_free_context().
+ * The mount context maintains a private struct libmnt_cache by default. This
+ * function allows to overwrite the private cache with an external instance.
+ * This function increments cache reference counter.
  *
- * If the @cache argument is NULL, then the current private cache instance is
- * reset.
+ * If the @cache argument is NULL, then the current cache instance is reset.
+ * This function apply the cache to fstab and mtab instances (if already
+ * exists).
+ *
+ * The old cache instance reference counter is de-incremented.
  *
  * Returns: 0 on success, negative number in case of error.
  */
@@ -1087,11 +1114,17 @@ int mnt_context_set_cache(struct libmnt_context *cxt, struct libmnt_cache *cache
 {
 	if (!cxt)
 		return -EINVAL;
-	if (!(cxt->flags & MNT_FL_EXTERN_CACHE))
-		mnt_free_cache(cxt->cache);
 
-	set_flag(cxt, MNT_FL_EXTERN_CACHE, cache != NULL);
+	mnt_ref_cache(cache);			/* new */
+	mnt_unref_cache(cxt->cache);		/* old */
+
 	cxt->cache = cache;
+
+	if (cxt->mtab)
+		mnt_table_set_cache(cxt->mtab, cache);
+	if (cxt->fstab)
+		mnt_table_set_cache(cxt->fstab, cache);
+
 	return 0;
 }
 
@@ -1110,10 +1143,9 @@ struct libmnt_cache *mnt_context_get_cache(struct libmnt_context *cxt)
 		return NULL;
 
 	if (!cxt->cache) {
-		cxt->cache = mnt_new_cache();
-		if (!cxt->cache)
-			return NULL;
-		cxt->flags &= ~MNT_FL_EXTERN_CACHE;
+		struct libmnt_cache *cache = mnt_new_cache();
+		mnt_context_set_cache(cxt, cache);
+		mnt_unref_cache(cache);
 	}
 	return cxt->cache;
 }
@@ -1595,6 +1627,7 @@ int mnt_context_prepare_helper(struct libmnt_context *cxt, const char *name,
 	if (mnt_context_is_nohelpers(cxt)
 	    || !type
 	    || !strcmp(type, "none")
+	    || strstr(type, "/..")		/* don't try to smuggle path */
 	    || mnt_fs_is_swaparea(cxt->fs))
 		return 0;
 

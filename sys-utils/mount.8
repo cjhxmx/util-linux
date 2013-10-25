@@ -148,8 +148,13 @@ partition
 .B PARTUUID
 or
 .B PARTLABEL
-(partition identifiers are supported for GUID Partition Table (GPT) and MAC
-partition tables only).
+(partition identifiers are supported for example for GUID Partition Table (GPT)
+partition tables).
+
+Don't forget that there is no guarantee that UUIDs and labels are really
+unique, especially if you move, share or copy the device.  Use
+.BR "lsblk -o +UUID,PARTUUID"
+to verify that the UUIDs are really unique in your system.
 
 The recommended setup is to use tags (e.g. LABEL=<label>) rather than
 .B /dev/disk/by-{label,uuid,partuuid,partlabel}
@@ -548,9 +553,9 @@ Command line options available for the
 .B mount
 command:
 .IP "\fB\-V, \-\-version\fP"
-Output version.
+Display version information and exit.
 .IP "\fB\-h, \-\-help\fP"
-Print a help message.
+Display help text and exit.
 .IP "\fB\-v, \-\-verbose\fP"
 Verbose mode.
 .IP "\fB\-a, \-\-all\fP"
@@ -2714,7 +2719,7 @@ include 65536 (64k), 131072 (128k) and 262144 (256k). The
 logbsize must be an integer multiple of the log
 stripe unit configured at mkfs time.
 .sp
-The default value for for version 1 logs is 32768, while the
+The default value for version 1 logs is 32768, while the
 default value for version 2 logs is MAX(32768, log_sunit).
 .TP
 .BR logdev=device and rtdev=device
@@ -2882,7 +2887,7 @@ some mount succeeded
 The command mount -a returns 0 (all success), 32 (all failed) or 64 (some
 failed, some success).
 
-.SH NOTES
+.SH "EXTERNAL HELPERS"
 The syntax of external mount helpers is:
 
 .RS
@@ -2898,6 +2903,26 @@ The syntax of external mount helpers is:
 where the <type> is filesystem type and \-sfnvo options have same meaning like
 standard mount options. The \-t option is used  for filesystems with subtypes
 support (for example /sbin/mount.fuse -t fuse.sshfs).
+
+The command mount does not pass mount options
+.BR unbindable ,
+.BR runbindable ,
+.BR private ,
+.BR rprivate ,
+.BR slave ,
+.BR rslave ,
+.BR shared ,
+.BR rshared ,
+.BR auto ,
+.BR noauto ,
+.BR comment ,
+.BR x-*,
+.BR loop ,
+.BR offset
+and
+.BR sizelimit
+to mount.<suffix> helpers. The all others options are
+used in comma delimited list as argument for the option -o.
 
 .SH FILES
 .TP 18n

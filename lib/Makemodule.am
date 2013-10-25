@@ -7,6 +7,7 @@ libcommon_la_SOURCES = \
 	lib/canonicalize.c \
 	lib/colors.c \
 	lib/crc32.c \
+	lib/crc64.c \
 	lib/env.c \
 	lib/fileutils.c \
 	lib/ismounted.c \
@@ -23,6 +24,7 @@ libcommon_la_SOURCES = \
 	lib/sysfs.c \
 	lib/tt.c \
 	lib/wholedisk.c \
+	lib/timeutils.c \
 	lib/ttyutils.c \
 	lib/xgetpass.c \
 	lib/exec_shell.c

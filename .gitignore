@@ -12,6 +12,8 @@
 *.gcda
 *.gcno
 *.gcov
+*.pyc
+*.vim
 Makefile
 aclocal.m4
 autom4te.cache
@@ -46,6 +48,7 @@ tags
 .tarball-version
 .version
 .dirstamp
+.clang_complete
 config/ltmain.sh
 config/test-driver
 test-suite.log
@@ -84,7 +87,6 @@ tests/run.sh.trs
 /delpart
 /dmesg
 /eject
-/elvtune
 /fallocate
 /fdformat
 /fdisk
@@ -128,6 +130,7 @@ tests/run.sh.trs
 /mountpoint
 /namei
 /newgrp
+/nologin
 /nsenter
 /partx
 /pg

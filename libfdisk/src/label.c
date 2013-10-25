@@ -17,7 +17,10 @@ int fdisk_probe_labels(struct fdisk_context *cxt)
 
 		if (!lb->op->probe)
 			continue;
-
+		if (lb->disabled) {
+			DBG(LABEL, dbgprint("%s disabled -- ignore", lb->name));
+			continue;
+		}
 		DBG(LABEL, dbgprint("probing for %s", lb->name));
 
 		cxt->label = lb;
@@ -80,6 +83,30 @@ int fdisk_write_disklabel(struct fdisk_context *cxt)
 	return cxt->label->op->write(cxt);
 }
 
+int fdisk_require_geometry(struct fdisk_context *cxt)
+{
+	assert(cxt);
+
+	return cxt->label
+	       && cxt->label->flags & FDISK_LABEL_FL_REQUIRE_GEOMETRY ? 1 : 0;
+}
+
+int fdisk_missing_geometry(struct fdisk_context *cxt)
+{
+	int rc;
+
+	assert(cxt);
+
+	rc = (fdisk_require_geometry(cxt) &&
+		    (!cxt->geom.heads || !cxt->geom.sectors
+				      || !cxt->geom.cylinders));
+
+	if (rc && !fdisk_context_listonly(cxt))
+		fdisk_warnx(cxt, _("Incomplete geometry setting."));
+
+	return rc;
+}
+
 /**
  * fdisk_verify_disklabel:
  * @cxt: fdisk context
@@ -94,8 +121,28 @@ int fdisk_verify_disklabel(struct fdisk_context *cxt)
 		return -EINVAL;
 	if (!cxt->label->op->verify)
 		return -ENOSYS;
+	if (fdisk_missing_geometry(cxt))
+		return -EINVAL;
 
 	return cxt->label->op->verify(cxt);
+}
+
+/**
+ * fdisk_list_disklabel:
+ * @cxt: fdisk context
+ *
+ * Lists in-memory partition table
+ *
+ * Returns 0 on success, otherwise, a corresponding error.
+ */
+int fdisk_list_disklabel(struct fdisk_context *cxt)
+{
+	if (!cxt || !cxt->label)
+		return -EINVAL;
+	if (!cxt->label->op->list)
+		return -ENOSYS;
+
+	return cxt->label->op->list(cxt);
 }
 
 /**
@@ -103,7 +150,7 @@ int fdisk_verify_disklabel(struct fdisk_context *cxt)
  * @cxt: fdisk context
  * @t: partition type to create or NULL for label-specific default
  *
- * Creates a new partition, with number @partnum and type @parttype.
+ * Creates a new partition with type @parttype.
  *
  * Returns 0.
  */
@@ -119,6 +166,8 @@ int fdisk_add_partition(struct fdisk_context *cxt,
 		return -EINVAL;
 	if (!cxt->label->op->part_add)
 		return -ENOSYS;
+	if (fdisk_missing_geometry(cxt))
+		return -EINVAL;
 
 	if (!(cxt->label->flags & FDISK_LABEL_FL_ADDPART_NOPARTNO)) {
 		int rc = fdisk_ask_partnum(cxt, &partnum, 1);
@@ -164,6 +213,9 @@ int fdisk_delete_partition(struct fdisk_context *cxt, size_t partnum)
  */
 int fdisk_create_disklabel(struct fdisk_context *cxt, const char *name)
 {
+	int haslabel = 0;
+	struct fdisk_label *lb;
+
 	if (!cxt)
 		return -EINVAL;
 
@@ -175,19 +227,73 @@ int fdisk_create_disklabel(struct fdisk_context *cxt, const char *name)
 #endif
 	}
 
-	if (cxt->label)
+	if (cxt->label) {
 		fdisk_deinit_label(cxt->label);
+		haslabel = 1;
+	}
 
-	cxt->label = fdisk_context_get_label(cxt, name);
-	if (!cxt->label)
+	lb = fdisk_context_get_label(cxt, name);
+	if (!lb || lb->disabled)
 		return -EINVAL;
-
-	DBG(LABEL, dbgprint("changing to %s label\n", cxt->label->name));
-	if (!cxt->label->op->create)
+	if (!lb->op->create)
 		return -ENOSYS;
 
-	fdisk_reset_alignment(cxt);
+	__fdisk_context_switch_label(cxt, lb);
+
+	if (haslabel && !cxt->parent)
+		fdisk_reset_device_properties(cxt);
+
+	DBG(LABEL, dbgprint("create a new %s label", lb->name));
 	return cxt->label->op->create(cxt);
+}
+
+
+int fdisk_locate_disklabel(struct fdisk_context *cxt, int n, const char **name,
+			   off_t *offset, size_t *size)
+{
+	if (!cxt || !cxt->label)
+		return -EINVAL;
+	if (!cxt->label->op->locate)
+		return -ENOSYS;
+
+	DBG(LABEL, dbgprint("locating %d chunk of %s.", n, cxt->label->name));
+	return cxt->label->op->locate(cxt, n, name, offset, size);
+}
+
+
+/**
+ * fdisk_get_disklabel_id:
+ * @cxt: fdisk context
+ * @id: returns pointer to allocated string
+ *
+ * Returns 0 on success, otherwise, a corresponding error.
+ */
+int fdisk_get_disklabel_id(struct fdisk_context *cxt, char **id)
+{
+	if (!cxt || !cxt->label)
+		return -EINVAL;
+	if (!cxt->label->op->get_id)
+		return -ENOSYS;
+
+	DBG(LABEL, dbgprint("asking for disk %s ID", cxt->label->name));
+	return cxt->label->op->get_id(cxt, id);
+}
+
+/**
+ * fdisk_get_disklabel_id:
+ * @cxt: fdisk context
+ *
+ * Returns 0 on success, otherwise, a corresponding error.
+ */
+int fdisk_set_disklabel_id(struct fdisk_context *cxt)
+{
+	if (!cxt || !cxt->label)
+		return -EINVAL;
+	if (!cxt->label->op->set_id)
+		return -ENOSYS;
+
+	DBG(LABEL, dbgprint("setting %s disk ID", cxt->label->name));
+	return cxt->label->op->set_id(cxt);
 }
 
 /**
@@ -332,4 +438,20 @@ int fdisk_label_is_changed(struct fdisk_label *lb)
 {
 	assert(lb);
 	return lb ? lb->changed : 0;
+}
+
+void fdisk_label_set_disabled(struct fdisk_label *lb, int disabled)
+{
+	assert(lb);
+
+	DBG(LABEL, dbgprint("%s label %s",
+				lb->name,
+				disabled ? "DISABLED" : "ENABLED"));
+	lb->disabled = disabled ? 1 : 0;
+}
+
+int fdisk_label_is_disabled(struct fdisk_label *lb)
+{
+	assert(lb);
+	return lb ? lb->disabled : 0;
 }

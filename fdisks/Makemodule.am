@@ -5,22 +5,10 @@ if BUILD_FDISK
 sbin_PROGRAMS += fdisk
 dist_man_MANS += fdisks/fdisk.8
 fdisk_SOURCES = \
-	fdisks/dos_part_types.h \
 	fdisks/fdisk.c \
 	fdisks/fdisk.h \
 	fdisks/fdisk-ask.c \
-	fdisks/fdiskbsdlabel.c \
-	fdisks/fdiskbsdlabel.h \
-	fdisks/fdiskdoslabel.c \
-	fdisks/fdiskdoslabel.h \
-	fdisks/fdiskmaclabel.c \
-	fdisks/fdiskmaclabel.h \
-	fdisks/fdisksgilabel.c \
-	fdisks/fdisksgilabel.h \
-	fdisks/fdisksunlabel.c \
-	fdisks/fdisksunlabel.h \
-	fdisks/partname.c \
-	fdisks/common.h
+	fdisks/fdisk-menu.c
 
 fdisk_LDADD = $(LDADD) libcommon.la libfdisk.la
 fdisk_CFLAGS = $(AM_CFLAGS) -I$(ul_libfdisk_incdir)
@@ -53,7 +41,7 @@ dist_man_MANS += fdisks/sfdisk.8
 sfdisk_SOURCES = \
 	fdisks/partname.c \
 	fdisks/sfdisk.c \
-	fdisks/common.h
+	fdisks/partname.h
 sfdisk_LDADD = $(LDADD) libcommon.la
 
 if HAVE_STATIC_SFDISK
@@ -67,8 +55,8 @@ endif
 if BUILD_CFDISK
 sbin_PROGRAMS += cfdisk
 dist_man_MANS += fdisks/cfdisk.8
-cfdisk_SOURCES = fdisks/cfdisk.c fdisks/common.h
-cfdisk_CFLAGS =
+cfdisk_SOURCES = fdisks/cfdisk.c
+cfdisk_CFLAGS = $(AM_CFLAGS)
 cfdisk_LDADD = $(LDADD) libcommon.la
 
 if BUILD_LIBBLKID
@@ -79,9 +67,8 @@ endif
 if HAVE_SLANG
 cfdisk_LDADD += -lslang
 else
-if HAVE_NCURSES
-cfdisk_LDADD += @NCURSES_LIBS@
-endif
+cfdisk_CFLAGS += $(NCURSES_CFLAGS)
+cfdisk_LDADD += $(NCURSES_LIBS)
 endif
 endif # BUILD_CFDISK
 

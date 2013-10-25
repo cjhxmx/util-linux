@@ -30,10 +30,8 @@ libblkid_la_SOURCES = \
 	\
 	libblkid/src/partitions/aix.c \
 	libblkid/src/partitions/aix.h \
-	libblkid/src/partitions/blkid_parttypes.h \
 	libblkid/src/partitions/bsd.c \
 	libblkid/src/partitions/dos.c \
-	libblkid/src/partitions/dos.h \
 	libblkid/src/partitions/gpt.c \
 	libblkid/src/partitions/mac.c \
 	libblkid/src/partitions/minix.c \
@@ -46,6 +44,7 @@ libblkid_la_SOURCES = \
 	libblkid/src/partitions/unixware.c \
 	\
 	libblkid/src/superblocks/adaptec_raid.c \
+	libblkid/src/superblocks/bcache.c \
 	libblkid/src/superblocks/befs.c \
 	libblkid/src/superblocks/bfs.c \
 	libblkid/src/superblocks/btrfs.c \
@@ -113,6 +112,7 @@ libblkid_la_LIBADD = libcommon.la
 
 
 libblkid_la_CFLAGS = \
+	$(SOLIB_CFLAGS) \
 	-I$(ul_libblkid_incdir) \
 	-I$(top_srcdir)/libblkid/src
 
@@ -128,6 +128,7 @@ libblkid_la_DEPENDENCIES = \
 	libblkid/src/blkid.h.in
 
 libblkid_la_LDFLAGS = \
+	$(SOLIB_LDFLAGS) \
 	-Wl,--version-script=$(top_srcdir)/libblkid/src/blkid.sym \
 	-version-info $(LIBBLKID_VERSION_INFO)
 

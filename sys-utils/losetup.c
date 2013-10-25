@@ -307,7 +307,7 @@ static int make_table(struct loopdev_cxt *lc,
 	char *cn_file = NULL;
 	int i;
 
-	if (!(tt = tt_new_table(tt_flags)))
+	if (!(tt = tt_new_table(tt_flags | TT_FL_FREEDATA)))
 		errx(EXIT_FAILURE, _("failed to initialize output table"));
 
 	for (i = 0; i < ncolumns; i++) {
@@ -368,12 +368,13 @@ static void usage(FILE *out)
 		program_invocation_short_name);
 
 	fputs(USAGE_OPTIONS, out);
-	fputs(_(" -a, --all                     list all used devices\n"
-		" -d, --detach <loopdev> [...]  detach one or more devices\n"
-		" -D, --detach-all              detach all used devices\n"
-		" -f, --find                    find first unused device\n"
-		" -c, --set-capacity <loopdev>  resize device\n"
-		" -j, --associated <file>       list all devices associated with <file>\n"), out);
+	fputs(_(" -a, --all                     list all used devices\n"), out);
+	fputs(_(" -d, --detach <loopdev> [...]  detach one or more devices\n"), out);
+	fputs(_(" -D, --detach-all              detach all used devices\n"), out);
+	fputs(_(" -f, --find                    find first unused device\n"), out);
+	fputs(_(" -c, --set-capacity <loopdev>  resize device\n"), out);
+	fputs(_(" -j, --associated <file>       list all devices associated with <file>\n"), out);
+
 	fputs(USAGE_SEPARATOR, out);
 
 	fputs(_(" -o, --offset <num>            start at offset <num> into file\n"), out);
@@ -387,7 +388,7 @@ static void usage(FILE *out)
 
 	fputs(_(" -l, --list                    list info about all or specified\n"), out);
 	fputs(_(" -O, --output <cols>           specify columns to output for --list\n"), out);
-	fputs(_(" -n, --noheadings              don't print headings for --list ouput\n"), out);
+	fputs(_(" -n, --noheadings              don't print headings for --list output\n"), out);
 	fputs(_("     --raw                     use raw --list output format\n"), out);
 
 	fputs(USAGE_SEPARATOR, out);
@@ -673,11 +674,7 @@ int main(int argc, char **argv)
 			/* errors */
 			errpre = hasdev && loopcxt_get_fd(&lc) < 0 ?
 					 loopcxt_get_device(&lc) : file;
-			if (errno == ERANGE && offset && offset % 512)
-				warnx(_("%s: failed to set up loop device, "
-					"offset is not 512-byte aligned."), errpre);
-			else
-				warn(_("%s: failed to set up loop device"), errpre);
+			warn(_("%s: failed to set up loop device"), errpre);
 			break;
 		} while (hasdev == 0);
 

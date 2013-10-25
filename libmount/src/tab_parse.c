@@ -630,8 +630,9 @@ int mnt_table_parse_stream(struct libmnt_table *tb, FILE *f, const char *filenam
 			if (rc == 0 && tb->fmt == MNT_FMT_MOUNTINFO)
 				rc = kernel_fs_postparse(tb, fs, &tid, filename);
 		}
+		mnt_unref_fs(fs);
+
 		if (rc) {
-			mnt_free_fs(fs);
 			if (rc == 1)
 				continue;	/* recoverable error */
 			if (feof(f))
@@ -820,7 +821,7 @@ struct libmnt_table *__mnt_new_table_from_file(const char *filename, int fmt)
 	if (tb) {
 		tb->fmt = fmt;
 		if (mnt_table_parse_file(tb, filename) != 0) {
-			mnt_free_table(tb);
+			mnt_unref_table(tb);
 			tb = NULL;
 		}
 	}
@@ -859,7 +860,7 @@ struct libmnt_table *mnt_new_table_from_dir(const char *dirname)
 		return NULL;
 	tb = mnt_new_table();
 	if (tb && mnt_table_parse_dir(tb, dirname) != 0) {
-		mnt_free_table(tb);
+		mnt_unref_table(tb);
 		tb = NULL;
 	}
 	return tb;
@@ -1102,6 +1103,6 @@ int mnt_table_parse_mtab(struct libmnt_table *tb, const char *filename)
 			mnt_table_merge_user_fs(tb, u_fs);
 	}
 
-	mnt_free_table(u_tb);
+	mnt_unref_table(u_tb);
 	return 0;
 }

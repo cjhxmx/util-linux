@@ -11,6 +11,7 @@ dist_noinst_HEADERS += \
 	include/colors.h \
 	include/cpuset.h \
 	include/crc32.h \
+	include/crc64.h \
 	include/env.h \
 	include/exec_shell.h \
 	include/exitcodes.h \
@@ -40,10 +41,15 @@ dist_noinst_HEADERS += \
 	include/swapheader.h \
 	include/sysfs.h \
 	include/timer.h \
+	include/timeutils.h \
 	include/tt.h \
 	include/ttyutils.h \
 	include/wholedisk.h \
 	include/widechar.h \
 	include/xalloc.h \
 	include/xgetpass.h \
+	include/pt-sgi.h \
+	include/pt-bsd.h \
+	include/pt-mbr.h \
+	include/pt-mbr-partnames.h \
 	include/pt-sun.h

@@ -450,7 +450,7 @@ static int show_locks(struct list_head *locks, int tt_flags)
 	struct list_head *p, *pnext;
 	struct tt *tt;
 
-	tt = tt_new_table(tt_flags);
+	tt = tt_new_table(tt_flags | TT_FL_FREEDATA);
 	if (!tt) {
 		warn(_("failed to initialize output table"));
 		return -1;
@@ -592,6 +592,6 @@ int main(int argc, char *argv[])
 	if (!rc && !list_empty(&locks))
 		rc = show_locks(&locks, tt_flags);
 
-	mnt_free_table(tab);
+	mnt_unref_table(tab);
 	return rc;
 }

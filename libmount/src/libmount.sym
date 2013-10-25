@@ -259,16 +259,31 @@ global:
 
 MOUNT_2.24 {
 global:
+	mnt_context_get_fstab_userdata;
+	mnt_context_get_fs_userdata;
+	mnt_context_get_mtab_userdata;
 	mnt_fs_append_comment;
 	mnt_fs_get_comment;
 	mnt_fs_set_comment;
+	mnt_ref_cache;
+	mnt_ref_fs;
+	mnt_ref_table;
 	mnt_table_append_intro_comment;
 	mnt_table_append_trailing_comment;
 	mnt_table_enable_comments;
+	mnt_table_first_fs;
 	mnt_table_get_intro_comment;
 	mnt_table_get_trailing_comment;
+	mnt_table_get_userdata;
+	mnt_table_is_empty;
+	mnt_table_last_fs;
 	mnt_table_replace_file;
 	mnt_table_set_intro_comment;
 	mnt_table_set_trailing_comment;
+	mnt_table_set_userdata;
+	mnt_table_with_comments;
 	mnt_table_write_file;
+	mnt_unref_cache;
+	mnt_unref_fs;
+	mnt_unref_table;
 } MOUNT_2.23;

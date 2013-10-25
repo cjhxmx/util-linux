@@ -73,7 +73,7 @@ static void __attribute__ ((__noreturn__)) done(int);
 int term_chk(char *, int *, time_t *, int);
 int utmp_chk(char *, char *);
 
-static gid_t myegid;
+static gid_t root_access;
 
 static void __attribute__ ((__noreturn__)) usage(FILE * out)
 {
@@ -120,7 +120,7 @@ int main(int argc, char **argv)
 			usage(stderr);
 		}
 
-	myegid = getegid();
+	root_access = !getegid();
 
 	/* check that sender has write enabled */
 	if (isatty(fileno(stdin)))
@@ -201,7 +201,7 @@ int utmp_chk(char *user, char *tty)
 
 	while ((uptr = getutent())) {
 		memcpy(&u, uptr, sizeof(u));
-		if (strncmp(user, u.ut_name, sizeof(u.ut_name)) == 0 &&
+		if (strncmp(user, u.ut_user, sizeof(u.ut_user)) == 0 &&
 		    strncmp(tty, u.ut_line, sizeof(u.ut_line)) == 0) {
 			res = 0;
 			break;
@@ -239,7 +239,7 @@ void search_utmp(char *user, char *tty, char *mytty, uid_t myuid)
 	user_is_me = 0;
 	while ((uptr = getutent())) {
 		memcpy(&u, uptr, sizeof(u));
-		if (strncmp(user, u.ut_name, sizeof(u.ut_name)) == 0) {
+		if (strncmp(user, u.ut_user, sizeof(u.ut_user)) == 0) {
 			++nloggedttys;
 			strncpy(atty, u.ut_line, sizeof(u.ut_line));
 			atty[sizeof(u.ut_line)] = '\0';
@@ -299,8 +299,9 @@ int term_chk(char *tty, int *msgsokP, time_t * atimeP, int showerror)
 		return 1;
 	}
 
-	/* group write bit and group ownership */
-	*msgsokP = (s.st_mode & (S_IWRITE >> 3)) && myegid == s.st_gid;
+	*msgsokP = !access(path, W_OK);
+	if (!root_access && *msgsokP)
+		*msgsokP = s.st_mode & S_IWGRP;
 	*atimeP = s.st_atime;
 	return 0;
 }
@@ -372,7 +373,7 @@ void wr_fputs(char *s)
 {
 	char c;
 
-#define	PUTC(c)	if (carefulputc(c, stdout) == EOF) \
+#define	PUTC(c)	if (carefulputc(c, stdout, '^') == EOF) \
     err(EXIT_FAILURE, _("carefulputc failed"));
 	while (*s) {
 		c = *s++;

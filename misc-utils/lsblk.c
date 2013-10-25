@@ -1371,20 +1371,19 @@ static void __attribute__((__noreturn__)) help(FILE *out)
 	fputs(_(" -d, --nodeps         don't print slaves or holders\n"), out);
 	fputs(_(" -D, --discard        print discard capabilities\n"), out);
 	fputs(_(" -e, --exclude <list> exclude devices by major number (default: RAM disks)\n"), out);
-	fputs(_(" -I, --include <list> show only devices with specified major numbers\n"), out);
 	fputs(_(" -f, --fs             output info about filesystems\n"), out);
-	fputs(_(" -h, --help           usage information (this)\n"), out);
 	fputs(_(" -i, --ascii          use ascii characters only\n"), out);
-	fputs(_(" -m, --perms          output info about permissions\n"), out);
+	fputs(_(" -I, --include <list> show only devices with specified major numbers\n"), out);
 	fputs(_(" -l, --list           use list format output\n"), out);
+	fputs(_(" -m, --perms          output info about permissions\n"), out);
 	fputs(_(" -n, --noheadings     don't print headings\n"), out);
 	fputs(_(" -o, --output <list>  output columns\n"), out);
 	fputs(_(" -p, --paths          print complete device path\n"), out);
 	fputs(_(" -P, --pairs          use key=\"value\" output format\n"), out);
 	fputs(_(" -r, --raw            use raw output format\n"), out);
 	fputs(_(" -s, --inverse        inverse dependencies\n"), out);
-	fputs(_(" -t, --topology       output info about topology\n"), out);
 	fputs(_(" -S, --scsi           output info about SCSI devices\n"), out);
+	fputs(_(" -t, --topology       output info about topology\n"), out);
 	fputs(USAGE_SEPARATOR, out);
 	fputs(USAGE_HELP, out);
 	fputs(USAGE_VERSION, out);
@@ -1579,7 +1578,7 @@ int main(int argc, char *argv[])
 	/*
 	 * initialize output columns
 	 */
-	if (!(lsblk->tt = tt_new_table(tt_flags)))
+	if (!(lsblk->tt = tt_new_table(tt_flags | TT_FL_FREEDATA)))
 		errx(EXIT_FAILURE, _("failed to initialize output table"));
 
 	for (i = 0; i < ncolumns; i++) {
@@ -1604,9 +1603,10 @@ int main(int argc, char *argv[])
 
 leave:
 	tt_free_table(lsblk->tt);
-	mnt_free_table(mtab);
-	mnt_free_table(swaps);
-	mnt_free_cache(mntcache);
+
+	mnt_unref_table(mtab);
+	mnt_unref_table(swaps);
+	mnt_unref_cache(mntcache);
 #ifdef HAVE_LIBUDEV
 	udev_unref(udev);
 #endif

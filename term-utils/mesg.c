@@ -68,16 +68,16 @@
 
 static void __attribute__ ((__noreturn__)) usage(FILE * out)
 {
-	fputs(_("\nUsage:\n"), out);
+	fputs(USAGE_HEADER, out);
 	/* TRANSLATORS: this program uses for y and n rpmatch(3),
 	 * which means they can be translated.  */
 	fprintf(out,
 	      _(" %s [options] [y | n]\n"), program_invocation_short_name);
-
-	fputs(_("\nOptions:\n"), out);
-	fputs(_(" -v, --verbose      explain what is being done\n"
-		" -V, --version      output version information and exit\n"
-		" -h, --help         output help screen and exit\n\n"), out);
+	fputs(USAGE_OPTIONS, out);
+	fputs(_(" -v, --verbose  explain what is being done\n"), out);
+	fputs(USAGE_HELP, out);
+	fputs(USAGE_VERSION, out);
+	fprintf(out, USAGE_MAN_TAIL("mesg(1)"));
 
 	exit(out == stderr ? MESG_EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -88,11 +88,6 @@ int main(int argc, char *argv[])
 	char *tty;
 	int ch, verbose = FALSE;
 
-	setlocale(LC_ALL, "");
-	bindtextdomain(PACKAGE, LOCALEDIR);
-	textdomain(PACKAGE);
-	atexit(close_stdout);
-
 	static const struct option longopts[] = {
 		{ "verbose",    no_argument,       0, 'v' },
 		{ "version",    no_argument,       0, 'V' },
@@ -100,14 +95,18 @@ int main(int argc, char *argv[])
 		{ NULL,         0, 0, 0 }
 	};
 
+	setlocale(LC_ALL, "");
+	bindtextdomain(PACKAGE, LOCALEDIR);
+	textdomain(PACKAGE);
+	atexit(close_stdout);
+
 	while ((ch = getopt_long(argc, argv, "vVh", longopts, NULL)) != -1)
 		switch (ch) {
 		case 'v':
 			verbose = TRUE;
 			break;
 		case 'V':
-			printf(_("%s from %s\n"), program_invocation_short_name,
-			PACKAGE_STRING);
+			printf(UTIL_LINUX_VERSION);
 			exit(EXIT_SUCCESS);
 		case 'h':
 			usage(stdout);

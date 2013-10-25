@@ -152,6 +152,7 @@ struct options {
 	char *issue;			/* alternative issue file */
 	char *erasechars;		/* string with erase chars */
 	char *killchars;		/* string with kill chars */
+	char *osrelease;		/* /etc/os-release data */
 	int delay;			/* Sleep seconds before prompt */
 	int nice;			/* Run login with this priority */
 	int numspeed;			/* number of baud rates to try */
@@ -210,16 +211,14 @@ static const struct Speedtab speedtab[] = {
 	{2400, B2400},
 	{4800, B4800},
 	{9600, B9600},
-#ifdef	B19200
+#ifdef B19200
 	{19200, B19200},
-#endif
-#ifdef	B38400
-	{38400, B38400},
-#endif
-#ifdef	EXTA
+#elif defined(EXTA)
 	{19200, EXTA},
 #endif
-#ifdef	EXTB
+#ifdef B38400
+	{38400, B38400},
+#elif defined(EXTB)
 	{38400, EXTB},
 #endif
 #ifdef B57600
@@ -230,6 +229,42 @@ static const struct Speedtab speedtab[] = {
 #endif
 #ifdef B230400
 	{230400, B230400},
+#endif
+#ifdef B460800
+	{460800, B460800},
+#endif
+#ifdef B500000
+	{500000, B500000},
+#endif
+#ifdef B576000
+	{576000, B576000},
+#endif
+#ifdef B921600
+	{921600, B921600},
+#endif
+#ifdef B1000000
+	{1000000, B1000000},
+#endif
+#ifdef B1152000
+	{1152000, B1152000},
+#endif
+#ifdef B1500000
+	{1500000, B1500000},
+#endif
+#ifdef B2000000
+	{2000000, B2000000},
+#endif
+#ifdef B2500000
+	{2500000, B2500000},
+#endif
+#ifdef B3000000
+	{3000000, B3000000},
+#endif
+#ifdef B3500000
+	{3500000, B3500000},
+#endif
+#ifdef B4000000
+	{4000000, B4000000},
 #endif
 	{0, 0},
 };
@@ -269,13 +304,13 @@ static char** getUsers();
 static char *fakehost;
 
 #ifdef DEBUGGING
-#ifndef
-# define DEBUG_OUTPUT "/dev/ttyp0"
-#endif
-#define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
+# ifndef DEBUG_OUTPUT
+#  define DEBUG_OUTPUT "/dev/ttyp0"
+# endif
+# define debug(s) do { fprintf(dbf,s); fflush(dbf); } while (0)
 FILE *dbf;
 #else
-#define debug(s) do { ; } while (0)
+# define debug(s) do { ; } while (0)
 #endif
 
 int main(int argc, char **argv)
@@ -459,7 +494,8 @@ int main(int argc, char **argv)
 			log_warn(_("%s: can't change process priority: %m"),
 				options.tty);
 	}
-
+	if (options.osrelease)
+		free(options.osrelease);
 #ifdef DEBUGGING
 	fprintf(dbf, "read %c\n", ch);
 	if (close_stream(dbf) != 0)
@@ -662,7 +698,7 @@ static void parse_args(int argc, char **argv, struct options *op)
 				else if (strcmp(optarg, "=auto") == 0)
 					op->clocal = CLOCAL_MODE_AUTO;
 				else
-					log_err(_("unssuported --local-line mode argument"));
+					log_err(_("invalid argument of --local-line"));
 			}
 			break;
 		case 'm':
@@ -880,7 +916,11 @@ static void update_utmp(struct options *op)
 	if (fakehost)
 		strncpy(ut.ut_host, fakehost, sizeof(ut.ut_host));
 	time(&t);
+#if defined(_HAVE_UT_TV)
+	ut.ut_tv.tv_sec = t;
+#else
 	ut.ut_time = t;
+#endif
 	ut.ut_type = LOGIN_PROCESS;
 	ut.ut_pid = pid;
 	ut.ut_session = sid;
@@ -1308,6 +1348,84 @@ static char *xgetdomainname(void)
 	return name;
 #endif
 	return NULL;
+}
+
+static char *read_os_release(struct options *op, const char *varname)
+{
+	int fd = -1;
+	struct stat st;
+	size_t varsz = strlen(varname);
+	char *p, *buf = NULL, *ret = NULL;
+
+	/* read the file only once */
+	if (!op->osrelease) {
+		fd = open(_PATH_OS_RELEASE, O_RDONLY);
+		if (fd == -1) {
+			log_warn(_("cannot open: %s: %m"), _PATH_OS_RELEASE);
+			return NULL;
+		}
+
+		if (fstat(fd, &st) < 0 || st.st_size > 4 * 1024 * 1024)
+			goto done;
+
+		op->osrelease = malloc(st.st_size + 1);
+		if (!op->osrelease)
+			log_err(_("failed to allocate memory: %m"));
+		if (read_all(fd, op->osrelease, st.st_size) != (ssize_t) st.st_size) {
+			free(op->osrelease);
+			op->osrelease = NULL;
+			goto done;
+		}
+		op->osrelease[st.st_size] = 0;
+	}
+	buf = strdup(op->osrelease);
+	if (!buf)
+		log_err(_("failed to allocate memory: %m"));
+	p = buf;
+
+	for (;;) {
+		char *eol, *eon;
+
+		p += strspn(p, "\n\r");
+		p += strspn(p, " \t\n\r");
+		if (!*p)
+			break;
+		if (strspn(p, "#;\n") != 0) {
+			p += strcspn(p, "\n\r");
+			continue;
+		}
+		if (strncmp(p, varname, varsz) != 0) {
+			p += strcspn(p, "\n\r");
+			continue;
+		}
+		p += varsz;
+		p += strspn(p, " \t\n\r=\"");
+		eol = p + strcspn(p, "\n\r");
+		*eol = '\0';
+		eon = eol-1;
+		while (eon > p) {
+			if (*eon == '\t' || *eon == ' ') {
+				eon--;
+				continue;
+			}
+			if (*eon == '"') {
+				*eon = '\0';
+				break;
+			}
+			break;
+		}
+		if (ret)
+			free(ret);
+		ret = strdup(p);
+		if (!ret)
+			log_err(_("failed to allocate memory: %m"));
+		p = eol + 1;
+	}
+done:
+	free(buf);
+	if (fd >= 0)
+		close(fd);
+	return ret;
 }
 
 /* Show login prompt, optionally preceded by /etc/issue contents. */
@@ -1992,8 +2110,8 @@ static speed_t bcode(char *s)
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
 	fputs(USAGE_HEADER, out);
-	fprintf(out, _(" %1$s [options] line [baud_rate,...] [termtype]\n"
-		       " %1$s [options] baud_rate,... line [termtype]\n"), program_invocation_short_name);
+	fprintf(out, _(" %1$s [options] <line> [<baud_rate>,...] [<termtype>]\n"
+		       " %1$s [options] <baud_rate>,... <line> [<termtype>]\n"), program_invocation_short_name);
 	fputs(USAGE_OPTIONS, out);
 	fputs(_(" -8, --8bits                assume 8-bit tty\n"), out);
 	fputs(_(" -a, --autologin <user>     login the specified user automatically\n"), out);
@@ -2005,7 +2123,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	fputs(_(" -i, --noissue              do not display issue file\n"), out);
 	fputs(_(" -I, --init-string <string> set init string\n"), out);
 	fputs(_(" -l, --login-program <file> specify login program\n"), out);
-	fputs(_(" -L, --local-line[=<mode>]  cotrol local line flag\n"), out);
+	fputs(_(" -L, --local-line[=<mode>]  control the local line flag\n"), out);
 	fputs(_(" -m, --extract-baud         extract baud rate during connect\n"), out);
 	fputs(_(" -n, --skip-login           do not prompt for login\n"), out);
 	fputs(_(" -o, --login-options <opts> options that are passed to login\n"), out);
@@ -2293,6 +2411,24 @@ static void output_special_char(unsigned char c, struct options *op,
 				printf("%ld", speedtab[i].speed);
 				break;
 			}
+		}
+		break;
+	}
+	case 'S':
+	{
+		char *var = NULL, varname[64];
+
+		if (get_escape_argument(fp, varname, sizeof(varname)))
+			var = read_os_release(op, varname);
+		else if (!(var = read_os_release(op, "PRETTY_NAME")))
+			var = uts.sysname;
+		if (var) {
+			if (strcmp(varname, "ANSI_COLOR") == 0)
+				printf("\033[%sm", var);
+			else
+				printf("%s", var);
+			if (var != uts.sysname)
+				free(var);
 		}
 		break;
 	}

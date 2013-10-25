@@ -148,7 +148,8 @@ struct lscpu_desc {
 	int	hyper;		/* hypervisor vendor ID */
 	int	virtype;	/* VIRT_PARA|FULL|NONE ? */
 	char	*mhz;
-	char	**mmhz;		/* maximum mega hertz */
+	char	**maxmhz;	/* maximum mega hertz */
+	char	**minmhz;	/* minimum mega hertz */
 	char	*stepping;
 	char    *bogomips;
 	char	*flags;
@@ -231,7 +232,8 @@ enum {
 	COL_ADDRESS,
 	COL_CONFIGURED,
 	COL_ONLINE,
-	COL_MMHZ,
+	COL_MAXMHZ,
+	COL_MINMHZ,
 };
 
 /* column description
@@ -255,7 +257,8 @@ static struct lscpu_coldesc coldescs[] =
 	[COL_ADDRESS]      = { "ADDRESS", N_("physical address of a CPU") },
 	[COL_CONFIGURED]   = { "CONFIGURED", N_("shows if the hypervisor has allocated the CPU") },
 	[COL_ONLINE]       = { "ONLINE", N_("shows if Linux currently makes use of the CPU") },
-	[COL_MMHZ]	   = { "MMHZ", N_("shows the maximum mhz of the CPU") }
+	[COL_MAXMHZ]	   = { "MAXMHZ", N_("shows the maximum MHz of the CPU") },
+	[COL_MINMHZ]	   = { "MINMHZ", N_("shows the minimum MHz of the CPU") }
 };
 
 static int
@@ -627,7 +630,7 @@ read_hypervisor(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 		char buf[BUFSIZ];
 		char *val = NULL;
 
-		fd = path_fopen("r", 0, _PATH_PROC_STATUS);
+		fd = path_fopen("r", 1, _PATH_PROC_STATUS);
 		while (fgets(buf, sizeof(buf), fd) != NULL) {
 			if (lookup(buf, "VxID", &val))
 				break;
@@ -785,11 +788,23 @@ read_max_mhz(struct lscpu_desc *desc, int num)
 {
 	if (!path_exist(_PATH_SYS_CPU "/cpu%d/cpufreq/cpuinfo_max_freq", num))
 		return;
-	if (!desc->mmhz)
-		desc->mmhz = xcalloc(desc->ncpuspos, sizeof(char *));
-	xasprintf(&(desc->mmhz[num]), "%.4f",
+	if (!desc->maxmhz)
+		desc->maxmhz = xcalloc(desc->ncpuspos, sizeof(char *));
+	xasprintf(&(desc->maxmhz[num]), "%.4f",
 		  (float)path_read_s32(_PATH_SYS_CPU
 				       "/cpu%d/cpufreq/cpuinfo_max_freq", num) / 1000);
+}
+
+static void
+read_min_mhz(struct lscpu_desc *desc, int num)
+{
+	if (!path_exist(_PATH_SYS_CPU "/cpu%d/cpufreq/cpuinfo_min_freq", num))
+		return;
+	if (!desc->minmhz)
+		desc->minmhz = xcalloc(desc->ncpuspos, sizeof(char *));
+	xasprintf(&(desc->minmhz[num]), "%.4f",
+		  (float)path_read_s32(_PATH_SYS_CPU
+				       "/cpu%d/cpufreq/cpuinfo_min_freq", num) / 1000);
 }
 
 static int
@@ -980,9 +995,13 @@ get_cell_data(struct lscpu_desc *desc, int cpu, int col,
 			snprintf(buf, bufsz,
 				 is_cpu_online(desc, cpu) ? _("yes") : _("no"));
 		break;
-	case COL_MMHZ:
-		if (desc->mmhz)
-			xstrncpy(buf, desc->mmhz[cpu], bufsz);
+	case COL_MAXMHZ:
+		if (desc->maxmhz)
+			xstrncpy(buf, desc->maxmhz[cpu], bufsz);
+		break;
+	case COL_MINMHZ:
+		if (desc->minmhz)
+			xstrncpy(buf, desc->minmhz[cpu], bufsz);
 		break;
 	}
 	return buf;
@@ -1127,7 +1146,7 @@ print_readable(struct lscpu_desc *desc, int cols[], int ncols,
 {
 	int i;
 	char buf[BUFSIZ], *data;
-	struct tt *tt = tt_new_table(0);
+	struct tt *tt = tt_new_table(TT_FL_FREEDATA);
 
 	if (!tt)
 		 err(EXIT_FAILURE, _("failed to initialize output table"));
@@ -1153,11 +1172,13 @@ print_readable(struct lscpu_desc *desc, int cols[], int ncols,
 		for (c = 0; c < ncols; c++) {
 			data = get_cell_data(desc, i, cols[c], mod,
 					     buf, sizeof(buf));
-			tt_line_set_data(line, c, data && *data ? xstrdup(data) : "-");
+			tt_line_set_data(line, c,
+					xstrdup(data && *data ? data : "-"));
 		}
 	}
 
 	tt_print_table(tt);
+	tt_free_table(tt);
 }
 
 /* output formats "<key>  <value>"*/
@@ -1291,8 +1312,10 @@ print_summary(struct lscpu_desc *desc, struct lscpu_modifier *mod)
 		print_s(_("Stepping:"), desc->stepping);
 	if (desc->mhz)
 		print_s(_("CPU MHz:"), desc->mhz);
-	if (desc->mmhz)
-		print_s(_("CPU max MHz:"), desc->mmhz[0]);
+	if (desc->maxmhz)
+		print_s(_("CPU max MHz:"), desc->maxmhz[0]);
+	if (desc->minmhz)
+		print_s(_("CPU min MHz:"), desc->minmhz[0]);
 	if (desc->bogomips)
 		print_s(_("BogoMIPS:"), desc->bogomips);
 	if (desc->virtflag) {
@@ -1461,6 +1484,7 @@ int main(int argc, char *argv[])
 		read_address(desc, i);
 		read_configured(desc, i);
 		read_max_mhz(desc, i);
+		read_min_mhz(desc, i);
 	}
 
 	if (desc->caches)
@@ -1507,8 +1531,10 @@ int main(int argc, char *argv[])
 				columns[ncolumns++] = COL_POLARIZATION;
 			if (desc->addresses)
 				columns[ncolumns++] = COL_ADDRESS;
-			if (desc->mmhz)
-				columns[ncolumns++] = COL_MMHZ;
+			if (desc->maxmhz)
+				columns[ncolumns++] = COL_MAXMHZ;
+			if (desc->minmhz)
+				columns[ncolumns++] = COL_MINMHZ;
 		}
 		print_readable(desc, columns, ncolumns, mod);
 		break;

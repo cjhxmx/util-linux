@@ -1,3 +1,6 @@
+#ifdef HAVE_LIBBLKID
+# include <blkid.h>
+#endif
 
 #include "fdiskP.h"
 
@@ -21,21 +24,19 @@ struct fdisk_context *fdisk_new_context(void)
 	cxt->labels[ cxt->nlabels++ ] = fdisk_new_gpt_label(cxt);
 	cxt->labels[ cxt->nlabels++ ] = fdisk_new_dos_label(cxt);
 	cxt->labels[ cxt->nlabels++ ] = fdisk_new_bsd_label(cxt);
-	cxt->labels[ cxt->nlabels++ ] = fdisk_new_mac_label(cxt);
 	cxt->labels[ cxt->nlabels++ ] = fdisk_new_sgi_label(cxt);
 	cxt->labels[ cxt->nlabels++ ] = fdisk_new_sun_label(cxt);
 
 	return cxt;
 }
 
-/* only BSD is supported now */
 struct fdisk_context *fdisk_new_nested_context(struct fdisk_context *parent,
 				const char *name)
 {
 	struct fdisk_context *cxt;
+	struct fdisk_label *lb = NULL;
 
 	assert(parent);
-	assert(name);
 
 	cxt = calloc(1, sizeof(*cxt));
 	if (!cxt)
@@ -54,11 +55,34 @@ struct fdisk_context *fdisk_new_nested_context(struct fdisk_context *parent,
 	cxt->grain =            parent->grain;
 	cxt->first_lba =        parent->first_lba;
 	cxt->total_sectors =    parent->total_sectors;
+	cxt->firstsector =	parent->firstsector;
+
+	cxt->ask_cb =		parent->ask_cb;
+	cxt->ask_data =		parent->ask_data;
 
 	cxt->geom = parent->geom;
 
-	if (strcmp(name, "bsd") == 0)
-		cxt->label = cxt->labels[ cxt->nlabels++ ] = fdisk_new_bsd_label(cxt);
+	if (name) {
+		if (strcmp(name, "bsd") == 0)
+			lb = cxt->labels[ cxt->nlabels++ ] = fdisk_new_bsd_label(cxt);
+		else if (strcmp(name, "dos") == 0)
+			lb = cxt->labels[ cxt->nlabels++ ] = fdisk_new_dos_label(cxt);
+	}
+
+	if (lb) {
+		DBG(LABEL, dbgprint("probing for nested %s", lb->name));
+
+		cxt->label = lb;
+
+		if (lb->op->probe(cxt) == 1)
+			__fdisk_context_switch_label(cxt, lb);
+		else {
+			DBG(LABEL, dbgprint("not found %s label", lb->name));
+			if (lb->op->deinit)
+				lb->op->deinit(lb);
+			cxt->label = NULL;
+		}
+	}
 
 	return cxt;
 }
@@ -77,18 +101,46 @@ struct fdisk_label *fdisk_context_get_label(struct fdisk_context *cxt, const cha
 		return cxt->label;
 
 	for (i = 0; i < cxt->nlabels; i++)
-		if (strcmp(cxt->labels[i]->name, name) == 0)
+		if (cxt->labels[i]
+		    && strcmp(cxt->labels[i]->name, name) == 0)
 			return cxt->labels[i];
 
 	DBG(LABEL, dbgprint("failed to found %s label driver\n", name));
 	return NULL;
 }
 
+int fdisk_context_next_label(struct fdisk_context *cxt, struct fdisk_label **lb)
+{
+	size_t i;
+	struct fdisk_label *res = NULL;
+
+	if (!lb || !cxt)
+		return -EINVAL;
+
+	if (!*lb)
+		res = cxt->labels[0];
+	else {
+		for (i = 1; i < cxt->nlabels; i++) {
+			if (*lb == cxt->labels[i - 1]) {
+				res = cxt->labels[i];
+				break;
+			}
+		}
+	}
+
+	*lb = res;
+	return res ? 0 : 1;
+}
+
 int __fdisk_context_switch_label(struct fdisk_context *cxt,
 				 struct fdisk_label *lb)
 {
-	if (!lb)
+	if (!lb || !cxt)
 		return -EINVAL;
+	if (lb->disabled) {
+		DBG(LABEL, dbgprint("*** attempt to switch to disabled label %s -- ignore!", lb->name));
+		return -EINVAL;
+	}
 	cxt->label = lb;
 	DBG(LABEL, dbgprint("--> switching context to %s!", lb->name));
 	return 0;
@@ -105,7 +157,7 @@ static void reset_context(struct fdisk_context *cxt)
 {
 	size_t i;
 
-	DBG(CONTEXT, dbgprint("\n-----\nresetting context %p", cxt));
+	DBG(CONTEXT, dbgprint("*** resetting context %p", cxt));
 
 	/* reset drives' private data */
 	for (i = 0; i < cxt->nlabels; i++)
@@ -115,26 +167,71 @@ static void reset_context(struct fdisk_context *cxt)
 	if (!cxt->parent && cxt->dev_fd > -1)
 		close(cxt->dev_fd);
 	free(cxt->dev_path);
-	free(cxt->firstsector);
+
+	if (cxt->parent == NULL || cxt->parent->firstsector != cxt->firstsector)
+		free(cxt->firstsector);
 
 	/* initialize */
 	cxt->dev_fd = -1;
 	cxt->dev_path = NULL;
 	cxt->firstsector = NULL;
 
-	cxt->io_size = 0;
-	cxt->optimal_io_size = 0;
-	cxt->min_io_size = 0;
-	cxt->phy_sector_size = 0;
-	cxt->sector_size = 0;
-	cxt->alignment_offset = 0;
-	cxt->grain = 0;
-	cxt->first_lba = 0;
-	cxt->total_sectors = 0;
-
-	memset(&cxt->geom, 0, sizeof(struct fdisk_geometry));
+	fdisk_zeroize_device_properties(cxt);
 
 	cxt->label = NULL;
+}
+
+/*
+ * This function prints a warning if the device is not wiped (e.g. wipefs(8).
+ * Please don't call this function if there is already a PT.
+ *
+ * Returns: 0 if nothing found, < 0 on error, 1 if found a signature
+ */
+static int warn_wipe(struct fdisk_context *cxt)
+{
+#ifdef HAVE_LIBBLKID
+	blkid_probe pr;
+#endif
+	int rc = 0;
+
+	assert(cxt);
+
+	if (fdisk_dev_has_disklabel(cxt) || cxt->dev_fd < 0)
+		return -EINVAL;
+#ifdef HAVE_LIBBLKID
+	DBG(LABEL, dbgprint("wipe check: initialize libblkid prober"));
+
+	pr = blkid_new_probe();
+	if (!pr)
+		return -ENOMEM;
+	rc = blkid_probe_set_device(pr, cxt->dev_fd, 0, 0);
+	if (rc)
+		return rc;
+
+	blkid_probe_enable_superblocks(pr, 1);
+	blkid_probe_set_superblocks_flags(pr, BLKID_SUBLKS_TYPE);
+	blkid_probe_enable_partitions(pr, 1);
+
+	/* we care about the first found FS/raid, so don't call blkid_do_probe()
+	 * in loop or don't use blkid_do_fullprobe() ... */
+	rc = blkid_do_probe(pr);
+	if (rc == 0) {
+		const char *name = NULL;
+
+		if (blkid_probe_lookup_value(pr, "TYPE", &name, 0) == 0 ||
+		    blkid_probe_lookup_value(pr, "PTTYPE", &name, 0) == 0) {
+			fdisk_warnx(cxt, _(
+				"%s: device contains a valid '%s' signature, it's "
+				"strongly recommended to wipe the device by command wipefs(8) "
+				"if this setup is unexpected to avoid "
+				"possible collisions."), cxt->dev_path, name);
+			rc = 1;
+		}
+	}
+
+	blkid_free_probe(pr);
+#endif
+	return rc;
 }
 
 /**
@@ -178,7 +275,15 @@ int fdisk_context_assign_device(struct fdisk_context *cxt,
 	/* detect labels and apply labes specific stuff (e.g geomery)
 	 * to the context */
 	fdisk_probe_labels(cxt);
-	fdisk_reset_alignment(cxt);
+
+	/* let's apply user geometry *after* label prober
+	 * to make it possible to override in-label setting */
+	fdisk_apply_user_device_properties(cxt);
+
+	/* warn about obsolete stuff on the device if we aren't in
+	 * list-only mode and there is not PT yet */
+	if (!fdisk_context_listonly(cxt) && !fdisk_dev_has_disklabel(cxt))
+		warn_wipe(cxt);
 
 	DBG(CONTEXT, dbgprint("context %p initialized for %s [%s]",
 			      cxt, fname,
@@ -187,6 +292,23 @@ int fdisk_context_assign_device(struct fdisk_context *cxt,
 fail:
 	DBG(CONTEXT, dbgprint("failed to assign device"));
 	return -errno;
+}
+
+int fdisk_context_deassign_device(struct fdisk_context *cxt)
+{
+	assert(cxt);
+	assert(cxt->dev_fd >= 0);
+
+	if (fsync(cxt->dev_fd) || close(cxt->dev_fd)) {
+		fdisk_warn(cxt, _("%s: close device failed"), cxt->dev_path);
+		return -errno;
+	}
+
+	fdisk_info(cxt, _("Syncing disks."));
+	sync();
+
+	cxt->dev_fd = -1;
+	return 0;
 }
 
 /**
@@ -235,6 +357,50 @@ int fdisk_context_set_ask(struct fdisk_context *cxt,
 	cxt->ask_cb = ask_cb;
 	cxt->ask_data = data;
 	return 0;
+}
+
+/**
+ * fdisk_context_enable_details:
+ * cxt: context
+ * enable: true/flase
+ *
+ * Enables or disables "details" display mode.
+ *
+ * Returns: 0 on success, < 0 on error.
+ */
+int fdisk_context_enable_details(struct fdisk_context *cxt, int enable)
+{
+	assert(cxt);
+	cxt->display_details = enable ? 1 : 0;
+	return 0;
+}
+
+int fdisk_context_display_details(struct fdisk_context *cxt)
+{
+	assert(cxt);
+	return cxt->display_details == 1;
+}
+
+/**
+ * fdisk_context_enable_listonly:
+ * cxt: context
+ * enable: true/flase
+ *
+ * Just list partition only, don't care about another details, mistakes, ...
+ *
+ * Returns: 0 on success, < 0 on error.
+ */
+int fdisk_context_enable_listonly(struct fdisk_context *cxt, int enable)
+{
+	assert(cxt);
+	cxt->listonly = enable ? 1 : 0;
+	return 0;
+}
+
+int fdisk_context_listonly(struct fdisk_context *cxt)
+{
+	assert(cxt);
+	return cxt->listonly == 1;
 }
 
 

@@ -21,6 +21,9 @@
 /**
  * mnt_new_fs:
  *
+ * The initial refcount is 1, and needs to be decremented to
+ * release the resources of the filesystem.
+ *
  * Returns: newly allocated struct libmnt_fs.
  */
 struct libmnt_fs *mnt_new_fs(void)
@@ -29,8 +32,9 @@ struct libmnt_fs *mnt_new_fs(void)
 	if (!fs)
 		return NULL;
 
-	/*DBG(FS, mnt_debug_h(fs, "alloc"));*/
+	fs->refcount = 1;
 	INIT_LIST_HEAD(&fs->ents);
+	/*DBG(FS, mnt_debug_h(fs, "alloc"));*/
 	return fs;
 }
 
@@ -38,7 +42,10 @@ struct libmnt_fs *mnt_new_fs(void)
  * mnt_free_fs:
  * @fs: fs pointer
  *
- * Deallocates the fs.
+ * Deallocates the fs. This function does not care about reference count. Don't
+ * use this function directly -- it's better to use use mnt_unref_fs().
+ *
+ * The reference counting is supported since util-linux v2.24.
  */
 void mnt_free_fs(struct libmnt_fs *fs)
 {
@@ -47,6 +54,7 @@ void mnt_free_fs(struct libmnt_fs *fs)
 	list_del(&fs->ents);
 
 	/*DBG(FS, mnt_debug_h(fs, "free"));*/
+	WARN_REFCOUNT(FS, fs, fs->refcount);
 
 	free(fs->source);
 	free(fs->bindsrc);
@@ -75,8 +83,46 @@ void mnt_free_fs(struct libmnt_fs *fs)
  */
 void mnt_reset_fs(struct libmnt_fs *fs)
 {
-	if (fs)
-		memset(fs, 0, sizeof(*fs));
+	int ref;
+
+	if (!fs)
+		return;
+
+	ref = fs->refcount;
+	memset(fs, 0, sizeof(*fs));
+	INIT_LIST_HEAD(&fs->ents);
+	fs->refcount = ref;
+}
+
+/**
+ * mnt_ref_fs:
+ * @fs: fs pointer
+ *
+ * Increments reference counter.
+ */
+void mnt_ref_fs(struct libmnt_fs *fs)
+{
+	if (fs) {
+		fs->refcount++;
+		/*DBG(FS, mnt_debug_h(fs, "ref=%d", fs->refcount));*/
+	}
+}
+
+/**
+ * mnt_unref_fs:
+ * @fs: fs pointer
+ *
+ * De-increments reference counter, on zero the @fs is automatically
+ * deallocated by mnt_free_fs().
+ */
+void mnt_unref_fs(struct libmnt_fs *fs)
+{
+	if (fs) {
+		fs->refcount--;
+		/*DBG(FS, mnt_debug_h(fs, "unref=%d", fs->refcount));*/
+		if (fs->refcount <= 0)
+			mnt_free_fs(fs);
+	}
 }
 
 static inline int update_str(char **dest, const char *src)
@@ -251,7 +297,12 @@ err:
 void *mnt_fs_get_userdata(struct libmnt_fs *fs)
 {
 	assert(fs);
-	return fs ? fs->userdata : NULL;
+
+	if (!fs)
+		return NULL;
+
+	/*DBG(FS, mnt_debug_h(fs, "get userdata [%p]", fs->userdata));*/
+	return fs->userdata;
 }
 
 /**
@@ -268,6 +319,8 @@ int mnt_fs_set_userdata(struct libmnt_fs *fs, void *data)
 	assert(fs);
 	if (!fs)
 		return -EINVAL;
+
+	/*DBG(FS, mnt_debug_h(fs, "set userdata [%p]", fs->userdata));*/
 	fs->userdata = data;
 	return 0;
 }
@@ -778,8 +831,12 @@ int mnt_fs_set_options(struct libmnt_fs *fs, const char *optstr)
 		if (rc)
 			return rc;
 		n = strdup(optstr);
-		if (!n)
+		if (!n) {
+			free(u);
+			free(v);
+			free(f);
 			return -ENOMEM;
+		}
 	}
 
 	free(fs->fs_optstr);
@@ -819,6 +876,9 @@ int mnt_fs_append_options(struct libmnt_fs *fs, const char *optstr)
 		return 0;
 
 	rc = mnt_split_optstr((char *) optstr, &u, &v, &f, 0, 0);
+	if (rc)
+		return rc;
+
 	if (!rc && v)
 		rc = mnt_optstr_append_option(&fs->vfs_optstr, v, NULL);
 	if (!rc && f)
@@ -859,6 +919,9 @@ int mnt_fs_prepend_options(struct libmnt_fs *fs, const char *optstr)
 		return 0;
 
 	rc = mnt_split_optstr((char *) optstr, &u, &v, &f, 0, 0);
+	if (rc)
+		return rc;
+
 	if (!rc && v)
 		rc = mnt_optstr_prepend_option(&fs->vfs_optstr, v, NULL);
 	if (!rc && f)

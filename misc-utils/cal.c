@@ -107,7 +107,7 @@ static char termbuffer[4096];
 static char tcbuffer[4096];
 static char *strbuf = termbuffer;
 
-static void my_setupterm(const char *term, int fildes, int *errret)
+static void my_setupterm(const char *term, int fildes __attribute__((__unused__)), int *errret)
 {
 	*errret = tgetent(tcbuffer, term);
 }
@@ -135,10 +135,12 @@ static void my_putstring(char *s)
 
 #endif	/* end of LIBTERMCAP / NCURSES */
 
-
+#if defined(HAVE_LIBNCURSES) || defined(HAVE_LIBNCURSESW) || defined(HAVE_LIBTERMCAP)
 static const char	*term="";
-static const char	*Senter="", *Sexit="";/* enter and exit standout mode */
 static int		Slen;		/* strlen of Senter+Sexit */
+#endif
+
+static const char	*Senter="", *Sexit="";/* enter and exit standout mode */
 static char		*Hrow;		/* pointer to highlighted row in month */
 
 #include "widechar.h"
@@ -169,6 +171,7 @@ enum {
 #define REFORMATION_MONTH	9		/* September */
 #define	FIRST_MISSING_DAY	639799		/* 3 Sep 1752 */
 #define	NUMBER_MISSING_DAYS	11		/* 11 day correction */
+#define YDAY_AFTER_MISSING	258             /* 14th in Sep 1752 */
 
 #define DAYS_IN_YEAR		365		/* the common case, leap years are calculated */
 #define MONTHS_IN_YEAR		12
@@ -182,6 +185,7 @@ enum {
 #define	WEEK_LEN		(DAYS_IN_WEEK * DAY_LEN)
 #define	HEAD_SEP		2
 #define MONTH_COLS		3		/* month columns in year view */
+#define WNUM_LEN                3
 
 #define	J_DAY_LEN		4		/* 4 spaces per day */
 #define	J_WEEK_LEN		(DAYS_IN_WEEK * J_DAY_LEN)
@@ -221,6 +225,12 @@ static const int d_sep1752[MAXDAYS / 2] = {
 	SPACE,	SPACE,	SPACE,	SPACE,	SPACE,	SPACE,	SPACE
 };
 
+enum {
+	WEEK_NUM_DISABLED = 0,
+	WEEK_NUM_MASK=0xff,
+	WEEK_NUM_ISO=0x100,
+	WEEK_NUM_US=0x200,
+};
 
 /* utf-8 can have up to 6 bytes per char; and an extra byte for ending \0 */
 static char day_headings[J_WEEK_LEN * 6 + 1];
@@ -234,16 +244,19 @@ static int julian;
 /* function prototypes */
 static int leap_year(long year);
 static char * ascii_day(char *, int);
+static char * ascii_wnum(char *, int,int);
 static int center_str(const char* src, char* dest, size_t dest_size, size_t width);
 static void center(const char *, size_t, int);
 static void day_array(int, int, long, int *);
 static int day_in_week(int, int, long);
 static int day_in_year(int, int, long);
-static void yearly(int, long, int);
-static int do_monthly(int, int, long, struct fmt_st*, int);
-static void monthly(int, int, long);
+static int week_number(int, int, long, int);
+static int week_to_day(int, long, int);
+static void yearly(int, long, int, int);
+static int do_monthly(int, int, long, int, struct fmt_st*, int);
+static void monthly(int, int, long, int);
 static int two_header_lines(int month, long year);
-static void monthly3(int, int, long);
+static void monthly3(int, int, long, int);
 static void __attribute__ ((__noreturn__)) usage(FILE * out);
 static void headers_init(int);
 
@@ -251,10 +264,10 @@ int main(int argc, char **argv)
 {
 	struct tm *local_time;
 	time_t now;
-	int ch, day = 0, month = 0, yflag = 0;
+	int ch, day = 0, month = 0, yflag = 0, wflag = WEEK_NUM_DISABLED;
 	long year;
 	int num_months = NUM_MONTHS;
-	int colormode = UL_COLORMODE_AUTO;
+	int colormode = UL_COLORMODE_AUTO, wnum = 0;
 
 	enum {
 		OPT_COLOR = CHAR_MAX + 1
@@ -267,6 +280,7 @@ int main(int argc, char **argv)
 		{"monday", no_argument, NULL, 'm'},
 		{"julian", no_argument, NULL, 'j'},
 		{"year", no_argument, NULL, 'y'},
+		{"week", optional_argument, NULL, 'w'},
 		{"color", optional_argument, NULL, OPT_COLOR},
 		{"version", no_argument, NULL, 'V'},
 		{"help", no_argument, NULL, 'h'},
@@ -325,7 +339,7 @@ int main(int argc, char **argv)
 	}
 #endif
 
-	while ((ch = getopt_long(argc, argv, "13mjsyVh", longopts, NULL)) != -1)
+	while ((ch = getopt_long(argc, argv, "13mjsywVh", longopts, NULL)) != -1)
 		switch(ch) {
 		case '1':
 			num_months = 1;		/* default */
@@ -345,6 +359,15 @@ int main(int argc, char **argv)
 		case 'y':
 			yflag = 1;
 			break;
+		case 'w':
+			if (optarg) {
+				wnum = strtos32_or_err(optarg,
+						_("invalid week argument"));
+				if (wnum < 1 || wnum > 53)
+					errx(EXIT_FAILURE,_("illegal week value: use 1-53"));
+			}
+			wflag = WEEK_NUM_US;	/* default per weekstart */
+			break;
 		case OPT_COLOR:
 			if (optarg)
 				colormode = colormode_or_err(optarg,
@@ -361,6 +384,11 @@ int main(int argc, char **argv)
 		}
 	argc -= optind;
 	argv += optind;
+
+	if (wflag) {
+		wflag = wnum & WEEK_NUM_MASK;
+		wflag |= (weekstart == MONDAY ? WEEK_NUM_ISO : WEEK_NUM_US);
+	}
 
 	time(&now);
 	local_time = localtime(&now);
@@ -388,7 +416,7 @@ int main(int argc, char **argv)
 		} else if ((long) (local_time->tm_year + 1900) == year) {
 			day = local_time->tm_yday + 1;
 		}
-		if (!month)
+		if (!month && !wnum)
 			yflag=1;
 		break;
 	case 0:
@@ -399,17 +427,47 @@ int main(int argc, char **argv)
 	default:
 		usage(stderr);
 	}
+
+	if (wnum > 0) {
+		int yday = week_to_day(wnum, year, wflag);
+		int leap = leap_year(year);
+
+		if (yday < 1)
+			errx(EXIT_FAILURE, _("illegal week value: year %ld "
+					     "doesn't have week %d"),
+					year, wnum);
+		month = 1;
+		while (month <= 12 && yday > days_in_month[leap][month])
+			yday -= days_in_month[leap][month++];
+		if (month > 12) {
+			/* In some years (e.g. 2010 in ISO mode) it's possible
+			 * to have a remnant of week 53 starting the year yet
+			 * the year in question ends during 52, in this case
+			 * we're assuming that early remnant is being referred
+			 * to if 53 is given as argument. */
+			if (wnum == week_number(31, 12, year - 1, wflag))
+				month = 1;
+			else
+				errx(EXIT_FAILURE,
+					_("illegal week value: year %ld "
+					  "doesn't have week %d"),
+					year, wnum);
+		}
+	}
+
 	headers_init(julian);
 
-	if (!colors_init(colormode))
+	if (!colors_init(colormode)) {
 		day = 0;
+		wflag &= ~WEEK_NUM_MASK;
+	}
 
 	if (yflag)
-		yearly(day, year, julian);
+		yearly(day, year, julian, wflag);
 	else if (num_months == 1)
-		monthly(day, month, year);
+		monthly(day, month, year, wflag);
 	else if (num_months == 3)
-		monthly3(day, month, year);
+		monthly3(day, month, year, wflag);
 
 	return EXIT_SUCCESS;
 }
@@ -446,22 +504,17 @@ static void headers_init(int julian)
 		full_month[i] = nl_langinfo(MON_1 + i);
 }
 
-static int do_monthly(int day, int month, long year,
+static int do_monthly(int day, int month, long year, int wflag,
 		      struct fmt_st *out, int header_hint)
 {
 	int col, row, days[MAXDAYS];
 	char *p, lineout[FMT_ST_CHARS];
-	size_t width = (julian ? J_WEEK_LEN : WEEK_LEN) - 1;
+	size_t width = (julian ? J_WEEK_LEN : WEEK_LEN) - 1
+		       + (wflag ? WNUM_LEN : 0);
 	int pos = 0;
 
 	day_array(day, month, year, days);
 
-	/*
-	 * %s is the month name, %d the year number.
-	 * you can change the order and/or add something here; eg for
-	 * Basque the translation should be: "%2$dko %1$s", and
-	 * the Vietnamese should be "%s na(m %d", etc.
-	 */
 	if (header_hint < 0)
 		header_hint = two_header_lines(month, year);
 	if (header_hint) {
@@ -472,16 +525,36 @@ static int do_monthly(int day, int month, long year,
 		center_str(lineout, out->s[pos], ARRAY_SIZE(out->s[pos]), width);
 		pos++;
 	} else {
+		/* TRANSLATORS: %s is the month name, %ld the year number.
+		 * You can change the order and/or add something here;
+		 * e.g. for Basque the translation should be "%2$ldko %1$s".
+		 */
 		snprintf(lineout, sizeof(lineout), _("%s %ld"),
 			full_month[month - 1], year);
 		center_str(lineout, out->s[pos], ARRAY_SIZE(out->s[pos]), width);
 		pos++;
 	}
 
-	snprintf(out->s[pos++], FMT_ST_CHARS, "%s", day_headings);
+	snprintf(out->s[pos++], FMT_ST_CHARS, "%s%s",
+				(wflag ? "   " : ""),
+				day_headings);
+
 	for (row = 0; row < DAYS_IN_WEEK - 1; row++) {
 		int has_hl = 0;
-		for (col = 0, p = lineout; col < DAYS_IN_WEEK; col++) {
+		p = lineout;
+		if (wflag)
+			for (col = 0; col < DAYS_IN_WEEK; col++) {
+				int xd = days[row * DAYS_IN_WEEK + col];
+				if (xd != SPACE) {
+					int wnum = week_number(xd & ~TODAY_FLAG,
+							month, year, wflag);
+					p = ascii_wnum(p, wnum,
+							(wflag & WEEK_NUM_MASK) == wnum);
+					break;
+				} else if (col+1 == DAYS_IN_WEEK)
+					p += sprintf(p,"   ");
+			}
+		for (col = 0; col < DAYS_IN_WEEK; col++) {
 			int xd = days[row * DAYS_IN_WEEK + col];
 			if (xd != SPACE && (xd & TODAY_FLAG))
 				has_hl = 1;
@@ -496,12 +569,12 @@ static int do_monthly(int day, int month, long year,
 	return pos;
 }
 
-static void monthly(int day, int month, long year)
+static void monthly(int day, int month, long year, int wflag)
 {
 	int i, rows;
 	struct fmt_st out;
 
-	rows = do_monthly(day, month, year, &out, -1);
+	rows = do_monthly(day, month, year, wflag, &out, -1);
 	for (i = 0; i < rows; i++) {
 		my_putstring(out.s[i]);
 		my_putstring("\n");
@@ -521,7 +594,7 @@ static int two_header_lines(int month, long year)
 	return 0;
 }
 
-static void monthly3(int day, int month, long year)
+static void monthly3(int day, int month, long year, int wflag)
 {
 	char lineout[FMT_ST_CHARS];
 	int i;
@@ -556,9 +629,9 @@ static void monthly3(int day, int month, long year)
 		rows = FMT_ST_LINES;
 	else
 		rows = FMT_ST_LINES - 1;
-	do_monthly(day, prev_month, prev_year, &out_prev, two_lines);
-	do_monthly(day, month,      year,      &out_curm, two_lines);
-	do_monthly(day, next_month, next_year, &out_next, two_lines);
+	do_monthly(day, prev_month, prev_year, wflag, &out_prev, two_lines);
+	do_monthly(day, month,      year,      wflag, &out_curm, two_lines);
+	do_monthly(day, next_month, next_year, wflag, &out_next, two_lines);
 
 	width = (julian ? J_WEEK_LEN : WEEK_LEN) -1;
 	for (i = 0; i < (two_lines ? 3 : 2); i++) {
@@ -585,30 +658,51 @@ static void monthly3(int day, int month, long year)
 	}
 }
 
-static void yearly(int day, long year, int julian)
+static char *append_wnum(char *p, int *dp,
+			 int month, long year, int cal,
+			 int row, int wflag)
 {
-	int col, *dp, i, month, row, which_cal;
+	int col;
+
+	for (col = 0; col < DAYS_IN_WEEK; col++) {
+		int xd = dp[row * DAYS_IN_WEEK + col];
+
+		if (xd != SPACE) {
+			int wnum = week_number(xd & ~TODAY_FLAG,
+					       month + cal + 1, year, wflag);
+			p = ascii_wnum(p, wnum, (wflag & WEEK_NUM_MASK) == wnum);
+			break;
+		} else if (col+1 == DAYS_IN_WEEK)
+			p += sprintf(p,"   ");
+	}
+	return p;
+}
+
+static void yearly(int day, long year, int julian, int wflag)
+{
+	int col, i, month, row, which_cal;
 	int maxrow, sep_len, week_len;
 	int days[MONTHS_IN_YEAR][MAXDAYS];
 	char *p;
 	/* three weeks + separators + \0 */
-	char lineout[ sizeof(day_headings) + 2 +
-		      sizeof(day_headings) + 2 +
-		      sizeof(day_headings) + 1 ];
-
+	int wnumlen = (wflag ? WNUM_LEN : 0);
+	char lineout[ wnumlen + sizeof(day_headings) + 2 +
+		      wnumlen + sizeof(day_headings) + 2 +
+		      wnumlen + sizeof(day_headings) + 1 ];
 	if (julian) {
 		maxrow = J_MONTH_COLS;
 		sep_len = J_HEAD_SEP;
-		week_len = J_WEEK_LEN;
+		week_len = J_WEEK_LEN + wnumlen;
 	} else {
 		maxrow = MONTH_COLS;
 		sep_len = HEAD_SEP;
-		week_len = WEEK_LEN;
+		week_len = WEEK_LEN + wnumlen;
 	}
 	snprintf(lineout, sizeof(lineout), "%ld", year);
-	/* 2013-04-28: The -1 near sep_len makes year header to be
-	 * aligned exactly how it has been aligned for long time, but it
-	 * is unexplainable.  */
+
+	/* 2013-04-28: The -1 near sep_len makes year header to be aligned
+	 * exactly how it has been aligned for long time, but it is
+	 * unexplainable.  */
 	center(lineout, (week_len + sep_len) * maxrow - sep_len - 1, 0);
 	my_putstring("\n\n");
 
@@ -625,17 +719,27 @@ static void yearly(int day, long year, int julian)
 		}
 		if (julian)
 			snprintf(lineout, sizeof(lineout),
-				 "\n%s%*s %s\n", day_headings, sep_len, "", day_headings);
+				 "\n%*s%s%*s %*s%s\n",
+				 wnumlen,"", day_headings, sep_len, "",
+				 wnumlen,"", day_headings);
 		else
 			snprintf(lineout, sizeof(lineout),
-				 "\n%s%*s %s%*s %s\n", day_headings, sep_len,
-				 "", day_headings, sep_len, "", day_headings);
+				 "\n%*s%s%*s %*s%s%*s %*s%s\n",
+				 wnumlen,"", day_headings, sep_len, "",
+				 wnumlen,"", day_headings, sep_len, "",
+				 wnumlen,"", day_headings);
 
 		my_putstring(lineout);
 		for (row = 0; row < DAYS_IN_WEEK - 1; row++) {
 			p = lineout;
 			for (which_cal = 0; which_cal < maxrow; which_cal++) {
-				dp = &days[month + which_cal][row * DAYS_IN_WEEK];
+				int *dp = &days[month + which_cal][row * DAYS_IN_WEEK];
+
+				if (wflag)
+					p = append_wnum(p, days[month + which_cal],
+							month, year, which_cal,
+							row, wflag);
+
 				for (col = 0; col < DAYS_IN_WEEK; col++)
 					p = ascii_day(p, *dp++);
 				p += sprintf(p, "  ");
@@ -674,6 +778,7 @@ static void day_array(int day, int month, long year, int *days)
 	dw = (day_in_week(1, month, year) - weekstart + DAYS_IN_WEEK) % DAYS_IN_WEEK;
 	julday = day_in_year(1, month, year);
 	daynum = julian ? julday : 1;
+
 	while (dm--) {
 		days[dw] = daynum++;
 		if (julday++ == day)
@@ -729,6 +834,80 @@ static int day_in_week(int d, int m, long y)
 	return NONEDAY;
 }
 
+/*
+ * week_number
+ *      return the week number of a given date, 1..53.
+ *      Supports ISO-8601 and North American modes.
+ *      Day may be given as Julian day of the year mode, in which
+ *      case the month is disregarded entirely.
+ */
+static int week_number(int day, int month, long year, int wflag)
+{
+	int fday = 0, yday;
+	int wday = day_in_week(1, 1, year);
+
+	if (wflag & WEEK_NUM_ISO)
+		fday = wday + (wday >= FRIDAY ? -2 : 5);
+	else
+		/* WEEK_NUM_US
+		 * - according to gcal, the first Sun is in the first week
+		 * - according to wikipedia, the first Sat is in the first week
+		 */
+		fday = wday + (wday == SUNDAY ? 6 : -1);
+
+	/* For julian dates the month can be set to 1, the global julian
+	 * variable cannot be relied upon here, because we may recurse
+	 * internally for 31.12. which would not work. */
+	if (day > 31)
+		month = 1;
+
+	yday = day_in_year(day,month,year);
+	if (year == REFORMATION_YEAR) {
+		if (yday >= YDAY_AFTER_MISSING)
+			fday -= NUMBER_MISSING_DAYS;
+	}
+
+	/* Last year is last year */
+	if (yday + fday < 7)
+		return week_number(31, 12, year - 1, wflag);
+
+	/* Or it could be part of the next year.  The reformation year had less
+	 * days than 365 making this check invalid, but reformation year ended
+	 * on Sunday and in week 51, so it's ok here. */
+	if (wflag == WEEK_NUM_ISO && yday >= 363
+	    && day_in_week(day, month, year) >= MONDAY
+	    && day_in_week(day, month, year) <= WEDNESDAY
+	    && day_in_week(31, 12, year) >= MONDAY
+	    && day_in_week(31, 12, year) <= WEDNESDAY)
+		return  week_number(1, 1, year + 1, wflag);
+
+	return (yday + fday) / 7;
+}
+
+/*
+ * week_to_day
+ *      return the yday of the first day in a given week inside
+ *      the given year. This may be something other than Monday
+ *      for ISO-8601 modes. For North American numbering this
+ *      always returns a Sunday.
+ */
+static int week_to_day(int wnum, long year, int wflag)
+{
+	int yday, wday;
+
+	wday = day_in_week(1, 1, year);
+	yday = wnum * 7 - wday;
+
+	if (wflag & WEEK_NUM_ISO)
+		yday -= (wday >= FRIDAY ? -2 : 5);
+	else
+		yday -= (wday == SUNDAY ? 6 : -1);	/* WEEK_NUM_US */
+	if (yday <= 0)
+		return 1;
+
+	return yday;
+}
+
 static char *ascii_day(char *p, int day)
 {
 	int display, val;
@@ -777,6 +956,18 @@ static char *ascii_day(char *p, int day)
 	return p;
 }
 
+static char * ascii_wnum(char *p, int wnum,int highlight)
+{
+	if (highlight)
+		p += sprintf(p,"%s",Senter);
+	p += sprintf(p,"%2d",wnum);
+	if (highlight)
+		p += sprintf(p,"%s ",Sexit);
+	else
+		p += sprintf(p," ");
+	return p;
+}
+
 /*
  * Center string, handling multibyte characters appropriately.
  * In addition if the string is too large for the width it's truncated.
@@ -807,13 +998,18 @@ static void __attribute__ ((__noreturn__)) usage(FILE * out)
 	fputs(USAGE_HEADER, out);
 	fprintf(out, _(" %s [options] [[[day] month] year]\n"), program_invocation_short_name);
 
+	fputs(USAGE_SEPARATOR, out);
+	fputs(_("Display a calendar, or some part of it.\n"), out);
+	fputs(_("Without any arguments, display the current month.\n"), out);
+
 	fputs(USAGE_OPTIONS, out);
-	fputs(_(" -1, --one             show only current month (default)\n"), out);
-	fputs(_(" -3, --three           show previous, current and next month\n"), out);
+	fputs(_(" -1, --one             show only a single month (default)\n"), out);
+	fputs(_(" -3, --three           show three months spanning the date\n"), out);
 	fputs(_(" -s, --sunday          Sunday as first day of week\n"), out);
 	fputs(_(" -m, --monday          Monday as first day of week\n"), out);
 	fputs(_(" -j, --julian          output Julian dates\n"), out);
-	fputs(_(" -y, --year            show whole current year\n"), out);
+	fputs(_(" -y, --year            show the whole year\n"), out);
+	fputs(_(" -w, --week[=<num>]    show US or ISO-8601 week numbers\n"), out);
 	fputs(_("     --color[=<when>]  colorize messages (auto, always or never)\n"), out);
 
 	fputs(USAGE_SEPARATOR, out);
